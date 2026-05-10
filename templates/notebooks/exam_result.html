@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% block title %}Exam Results | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:760px;margin:0 auto;">
+
+  <!-- Score header -->
+  <div class="text-center mb-5">
+    <div class="display-2 fw-bold mb-2
+      {% if report.score_percentage >= 80 %}text-success
+      {% elif report.score_percentage >= 60 %}text-warning
+      {% else %}text-danger{% endif %}">
+      {{ report.score_percentage|floatformat:1 }}%
+    </div>
+    <h1 class="h4 fw-semibold mb-1">{{ exam.notebook.title }}</h1>
+    <p class="text-muted small">
+      Exam completed {{ exam.ended_at|date:"M j, Y \a\t H:i" }}
+      {% if exam.ended_at and exam.started_at %}
+        &nbsp;·&nbsp; {{ exam.started_at|timesince:exam.ended_at }} total
+      {% endif %}
+    </p>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="row g-3 mb-4">
+    <div class="col-4">
+      <div class="cornote-card p-3 text-center">
+        <div class="h3 fw-bold text-success mb-0">{{ report.correct_answers }}</div>
+        <small class="text-muted">Correct</small>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="cornote-card p-3 text-center">
+        <div class="h3 fw-bold text-warning mb-0">{{ report.partial_answers }}</div>
+        <small class="text-muted">Partial</small>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="cornote-card p-3 text-center">
+        <div class="h3 fw-bold text-danger mb-0">{{ report.incorrect_answers }}</div>
+        <small class="text-muted">Incorrect / Skipped</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- By difficulty -->
+  {% if report.by_difficulty %}
+  <div class="cornote-card p-4 mb-4">
+    <h6 class="fw-semibold mb-3">Performance by Difficulty</h6>
+    {% for level, stats in report.by_difficulty.items %}
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="text-muted small" style="width:80px;">
+        {% if level == "difficulty_1" %}Easy
+        {% elif level == "difficulty_2" %}Medium
+        {% else %}Hard{% endif %}
+      </span>
+      <div class="progress flex-grow-1" style="height:8px;background:var(--bg-elevated)">
+        <div class="progress-bar bg-accent" style="width:{{ stats.accuracy }}%"></div>
+      </div>
+      <span class="small text-muted" style="width:80px;text-align:right;">
+        {{ stats.correct }}/{{ stats.total }} ({{ stats.accuracy|floatformat:0 }}%)
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Actions -->
+  <div class="d-flex gap-3 justify-content-center flex-wrap">
+    <a href="{% url 'notebooks:detail' exam.notebook.pk %}" class="btn btn-accent">
+      <i class="bi bi-book-open me-2"></i>Review Notebook
+    </a>
+    <a href="{% url 'notebooks:exam_page' exam.notebook.pk %}" class="btn btn-ghost">
+      <i class="bi bi-arrow-repeat me-2"></i>Retake Exam
+    </a>
+    <a href="{% url 'notebooks:dashboard' %}" class="btn btn-ghost">
+      <i class="bi bi-grid me-2"></i>Dashboard
+    </a>
+  </div>
+
+</div>
+{% endblock %}

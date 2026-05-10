@@ -1,0 +1,53 @@
+{% if error %}
+<div class="alert alert-danger small p-3">
+  <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
+</div>
+{% else %}
+<div class="summary-feedback-card p-3 rounded h-100">
+  <h6 class="fw-semibold mb-3">
+    <i class="bi bi-stars text-accent me-2"></i>Feedback
+  </h6>
+
+  {% if summary.feedback_text %}
+  <p class="small text-muted mb-3">{{ summary.feedback_text }}</p>
+  {% endif %}
+
+  {% if summary.included_key_points %}
+  <div class="mb-3">
+    <p class="small fw-semibold text-success mb-1">
+      <i class="bi bi-check-circle-fill me-1"></i>Covered ({{ summary.included_key_points|length }})
+    </p>
+    <ul class="list-unstyled mb-0">
+      {% for point in summary.included_key_points %}
+      <li class="small text-muted mb-1">
+        <i class="bi bi-check2 text-success me-1"></i>{{ point }}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if summary.missed_key_points %}
+  <div>
+    <p class="small fw-semibold text-warning mb-1">
+      <i class="bi bi-exclamation-circle-fill me-1"></i>Missed ({{ summary.missed_key_points|length }})
+    </p>
+    <ul class="list-unstyled mb-0">
+      {% for point in summary.missed_key_points %}
+      <li class="small text-muted mb-1">
+        <i class="bi bi-dot text-warning me-1"></i>{{ point }}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if not summary.missed_key_points and not summary.included_key_points %}
+  <p class="small text-muted">Could not evaluate against specific key points. Check your summary covers the main ideas from the material.</p>
+  {% endif %}
+
+  <p class="text-muted mt-3 mb-0" style="font-size:.7rem;">
+    <i class="bi bi-clock me-1"></i>{{ summary.feedback_generated_at|date:"M j, Y, g:i A" }}
+  </p>
+</div>
+{% endif %}

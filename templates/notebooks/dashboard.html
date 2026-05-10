@@ -1,0 +1,144 @@
+{% extends 'base.html' %}
+{% block title %}My Notebooks | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:1100px;margin:0 auto;">
+
+  <!-- Header -->
+  <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
+    <div>
+      <h1 class="h4 fw-bold mb-0">My Notebooks</h1>
+      <p class="text-muted small mb-0">{{ notebooks.count }} notebook{{ notebooks.count|pluralize }}</p>
+    </div>
+    <a href="{% url 'notebooks:upload' %}" class="btn btn-accent">
+      <i class="bi bi-cloud-upload me-2"></i>Upload PDF
+    </a>
+  </div>
+
+  <!-- Feature Quick Access -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <a href="{% url 'notebooks:analytics_page' %}" class="cornote-card d-flex align-items-center gap-3 p-3 text-decoration-none">
+        <i class="bi bi-bar-chart-line fs-4" style="color:var(--primary)"></i>
+        <div>
+          <div class="fw-semibold small">Analytics</div>
+          <div class="text-muted" style="font-size:.7rem;">Track progress</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md-3">
+      <a href="{% url 'notebooks:achievements_page' %}" class="cornote-card d-flex align-items-center gap-3 p-3 text-decoration-none">
+        <i class="bi bi-trophy fs-4 text-accent"></i>
+        <div>
+          <div class="fw-semibold small">Achievements</div>
+          <div class="text-muted" style="font-size:.7rem;">Earn badges</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md-3">
+      <a href="{% url 'notebooks:spaced_review_page' %}" class="cornote-card d-flex align-items-center gap-3 p-3 text-decoration-none">
+        <i class="bi bi-arrow-repeat fs-4" style="color:var(--secondary)"></i>
+        <div>
+          <div class="fw-semibold small">Review Queue</div>
+          <div class="text-muted" style="font-size:.7rem;">Spaced repetition</div>
+        </div>
+      </a>
+    </div>
+    <div class="col-6 col-md-3">
+      <a href="{% url 'notebooks:preferences_page' %}" class="cornote-card d-flex align-items-center gap-3 p-3 text-decoration-none">
+        <i class="bi bi-sliders fs-4 text-muted"></i>
+        <div>
+          <div class="fw-semibold small">Preferences</div>
+          <div class="text-muted" style="font-size:.7rem;">Customize</div>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  {% if notebooks %}
+  <div class="row g-3">
+    {% for nb in notebooks %}
+    <div class="col-sm-6 col-lg-4">
+      <div class="cornote-card h-100 position-relative">
+        <!-- Status badge -->
+        <span class="badge status-badge
+          {% if nb.status == 'ready' %}bg-success
+          {% elif nb.status == 'error' %}bg-danger
+          {% else %}bg-warning text-dark
+          {% endif %}">
+          {% if nb.status == 'ready' %}
+            <i class="bi bi-check-circle me-1"></i>Ready
+          {% elif nb.status == 'processing' %}
+            <i class="bi bi-hourglass-split me-1"></i>Processing
+          {% elif nb.status == 'error' %}
+            <i class="bi bi-exclamation-circle me-1"></i>Error
+          {% else %}
+            <i class="bi bi-cloud-upload me-1"></i>Uploading
+          {% endif %}
+        </span>
+
+        <div class="p-4 pt-5">
+          <h2 class="h6 fw-semibold mb-1 text-truncate" title="{{ nb.title }}">{{ nb.title }}</h2>
+          <p class="text-muted" style="font-size:.75rem;">
+            <i class="bi bi-calendar3 me-1"></i>{{ nb.created_at|date:"M j, Y" }}
+          </p>
+
+          {% if nb.status == 'ready' %}
+          <div class="mb-3">
+            <div class="d-flex justify-content-between text-muted mb-1" style="font-size:.75rem;">
+              <span><i class="bi bi-question-circle me-1"></i>{{ nb.question_count }} questions</span>
+              <span>{{ nb.graded_count }}/{{ nb.question_count }} graded</span>
+            </div>
+            {% if nb.question_count > 0 %}
+            <div class="progress" style="height:4px;">
+              <div class="progress-bar bg-accent"
+                   style="width:{% widthratio nb.graded_count nb.question_count 100 %}%">
+              </div>
+            </div>
+            {% endif %}
+          </div>
+          <a href="{% url 'notebooks:detail' nb.pk %}" class="btn btn-outline-accent btn-sm w-100">
+            <i class="bi bi-book-open me-1"></i>Open Notebook
+          </a>
+          {% elif nb.status == 'error' %}
+          <p class="text-danger small mb-2">{{ nb.error_message|truncatechars:100 }}</p>
+          <form method="post" action="{% url 'notebooks:retry' nb.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-warning btn-sm w-100">
+              <i class="bi bi-arrow-repeat me-1"></i>Try Again
+            </button>
+          </form>
+          {% else %}
+          <a href="{% url 'notebooks:processing' nb.pk %}" class="btn btn-outline-secondary btn-sm w-100">
+            <i class="bi bi-arrow-repeat me-1"></i>View Progress
+          </a>
+          {% endif %}
+
+          <!-- Delete -->
+          <form method="post" action="{% url 'notebooks:delete' nb.pk %}"
+                onsubmit="return confirm('Delete "{{ nb.title }}"? This cannot be undone.')">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-ghost btn-sm w-100 mt-2 text-danger-subtle">
+              <i class="bi bi-trash3 me-1"></i>Delete
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <!-- Empty state -->
+  <div class="empty-state text-center py-5 mt-3">
+    <i class="bi bi-journal-plus display-1 text-muted mb-3"></i>
+    <h2 class="h5 fw-semibold">No notebooks yet</h2>
+    <p class="text-muted mb-4">Upload a PDF to create your first Cornell study notebook.</p>
+    <a href="{% url 'notebooks:upload' %}" class="btn btn-accent btn-lg px-5">
+      <i class="bi bi-cloud-upload me-2"></i>Upload Your First PDF
+    </a>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

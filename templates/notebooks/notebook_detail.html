@@ -1,0 +1,484 @@
+{% extends 'base.html' %}
+{% block title %}{{ notebook.title }} | Cornote{% endblock %}
+
+{% block extra_head %}
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
+<style>
+  body { overflow-x: hidden; }
+  .ql-toolbar { background: var(--bg-elevated); border-color: var(--bg-border) !important; border-radius: 6px 6px 0 0; }
+  .ql-container { border-color: var(--bg-border) !important; border-radius: 0 0 6px 6px; background: var(--bg-surface); color: var(--text-primary); font-size: .95rem; }
+  .ql-editor { min-height: 200px; color: var(--text-primary); }
+  .ql-stroke { stroke: var(--text-secondary) !important; }
+  .ql-fill { fill: var(--text-secondary) !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- ── Notebook Toolbar ── -->
+<div class="notebook-toolbar d-flex align-items-center justify-content-between px-3 px-md-4 py-2 flex-wrap gap-2">
+  <div class="d-flex align-items-center gap-2 flex-wrap">
+    <a href="{% url 'notebooks:dashboard' %}" class="btn btn-ghost btn-sm">
+      <i class="bi bi-arrow-left"></i>
+    </a>
+    <span class="notebook-title fw-semibold text-truncate" style="max-width:260px;" title="{{ notebook.title }}">
+      {{ notebook.title }}
+    </span>
+    <span class="badge bg-secondary" style="font-size:.7rem;">
+      {{ notebook.question_count }} Q
+    </span>
+  </div>
+
+  <div class="d-flex align-items-center gap-2">
+    <!-- Grade All -->
+    <button class="btn btn-sm btn-outline-accent"
+            hx-post="{% url 'notebooks:grade_answers' notebook.pk %}"
+            hx-target="#questions-column"
+            hx-swap="innerHTML"
+            hx-indicator="#grade-spinner">
+      <span id="grade-spinner" class="htmx-indicator spinner-border spinner-border-sm me-1"></span>
+      <i class="bi bi-check2-circle me-1"></i>Grade All
+    </button>
+
+    <!-- Tools dropdown -->
+    <div class="dropdown">
+      <button class="btn btn-sm btn-ghost dropdown-toggle" data-bs-toggle="dropdown" title="Tools">
+        <i class="bi bi-grid-3x3-gap"></i>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li>
+          <a class="dropdown-item" href="{% url 'notebooks:exam_page' notebook.pk %}">
+            <i class="bi bi-stopwatch me-2"></i>Start Exam
+          </a>
+        </li>
+        <li>
+          <button class="dropdown-item" data-bs-toggle="modal" data-bs-target="#pdfViewerModal">
+            <i class="bi bi-file-earmark-text me-2"></i>View Source PDF
+          </button>
+        </li>
+        <li><hr class="dropdown-divider"></li>
+        <li>
+          <a class="dropdown-item" href="{% url 'notebooks:export_pdf' notebook.pk %}">
+            <i class="bi bi-file-earmark-pdf me-2"></i>Export as PDF
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item" href="{% url 'notebooks:export_anki' notebook.pk %}">
+            <i class="bi bi-collection me-2"></i>Export to Anki
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Pomodoro Timer -->
+    <div class="timer-widget d-flex align-items-center gap-2">
+      <span id="timer-display" class="timer-display font-mono">{{ focus_duration }}:00</span>
+      <button class="btn btn-sm btn-ghost timer-btn" id="timer-start" title="Start/Pause" onclick="timerToggle()">
+        <i class="bi bi-play-fill" id="timer-icon"></i>
+      </button>
+      <button class="btn btn-sm btn-ghost timer-btn" title="Reset" onclick="timerReset()">
+        <i class="bi bi-arrow-counterclockwise"></i>
+      </button>
+      <span class="badge timer-phase-badge" id="timer-phase-badge">Focus</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Cornell Notebook Grid ── -->
+<div class="cornell-grid">
+
+  <!-- LEFT COLUMN: Cues / Questions -->
+  <div class="cornell-questions" id="questions-column">
+    {% include 'notebooks/partials/questions_column.html' %}
+  </div>
+
+  <!-- RIGHT COLUMN: Notes -->
+  <div class="cornell-notes">
+    <div class="cornell-col-header">
+      <i class="bi bi-file-text me-2"></i>Notes
+      <div class="ms-auto d-flex align-items-center gap-2">
+        <span id="notes-save-indicator"></span>
+        <!-- Edit/View toggle (hidden when Quill is active) -->
+        <button class="btn btn-ghost btn-sm py-0 {% if notebook.notes_html %}d-none{% endif %}"
+                id="notes-edit-btn" onclick="toggleNotesView()" title="Edit notes">
+          <i class="bi bi-pencil" style="font-size:.8rem;"></i>
+        </button>
+        <!-- Rich text toggle -->
+        <button class="btn btn-ghost btn-sm py-0" id="toggle-editor-btn" onclick="toggleEditor()" title="Toggle rich text">
+          <i class="bi bi-type-bold" style="font-size:.8rem;"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Quill rich-text editor -->
+    <div id="quill-editor" style="height:calc(100% - 44px);border:none;"
+         class="{% if notebook.notes_html %}d-block{% else %}d-none{% endif %}"></div>
+
+    <!-- Formatted read view (default for plain-text notes) -->
+    <div id="notes-render"
+         class="notes-render {% if notebook.notes_html %}d-none{% endif %}"></div>
+
+    <!-- Plain-text textarea (edit mode only) -->
+    <textarea
+      id="plain-notes"
+      class="notes-textarea w-100 d-none"
+      name="notes_content"
+      placeholder="Your notes will appear here after processing…"
+      hx-post="{% url 'notebooks:save_notes' notebook.pk %}"
+      hx-trigger="keyup changed delay:1500ms"
+      hx-target="#notes-save-indicator"
+      hx-swap="innerHTML"
+    >{{ notebook.notes_content }}</textarea>
+  </div>
+
+</div>
+
+<!-- ── Summary Section with Vertical Sidebar Nav ── -->
+<div class="cornell-summary">
+  <div class="cornell-col-header">
+    <i class="bi bi-pencil-square me-2"></i>Summary & Review
+    <span class="ms-auto" id="summary-save-indicator"></span>
+  </div>
+
+  <div class="summary-layout">
+    <!-- Vertical section sidebar -->
+    <nav class="summary-sidenav">
+      <button class="summary-tab-btn active" onclick="switchSummaryTab('user-summary', this)" type="button">
+        <i class="bi bi-pencil-square"></i>
+        <span>Your Summary</span>
+      </button>
+      <button class="summary-tab-btn" onclick="switchSummaryTab('ai-summary', this)" type="button">
+        <i class="bi bi-lightning-fill"></i>
+        <span>AI Summary</span>
+      </button>
+      <button class="summary-tab-btn" onclick="switchSummaryTab('feedback-content', this)" type="button">
+        <i class="bi bi-stars"></i>
+        <span>Feedback</span>
+      </button>
+    </nav>
+
+    <!-- Tab Content -->
+    <div class="summary-tab-content">
+
+    <!-- Your Summary Tab -->
+    <div class="summary-panel" id="user-summary">
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <textarea
+            class="summary-textarea w-100"
+            name="user_summary"
+            id="summary-textarea"
+            placeholder="Summarise the key ideas from this material…"
+            rows="6"
+            hx-post="{% url 'notebooks:save_summary' notebook.pk %}"
+            hx-trigger="keyup changed delay:1500ms"
+            hx-target="#summary-save-indicator"
+            hx-swap="innerHTML"
+          >{{ summary.user_summary }}</textarea>
+
+          <button type="button" class="btn btn-accent mt-2 w-100" id="feedback-btn" onclick="getFeedback()">
+            <span id="summary-spinner" class="spinner-border spinner-border-sm me-1 d-none"></span>
+            <i class="bi bi-stars me-2"></i>Get Feedback on Summary
+          </button>
+        </div>
+
+        <div class="col-lg-6" id="summary-feedback-area">
+          {% if summary.feedback_text %}
+            {% include 'notebooks/partials/summary_feedback.html' %}
+          {% else %}
+          <div class="feedback-placeholder h-100 d-flex align-items-center justify-content-center rounded p-4">
+            <div class="text-center text-muted">
+              <i class="bi bi-stars display-6 mb-2 d-block"></i>
+              <p class="small mb-0">Write your summary and click <em>Get Feedback</em> to see which key points you covered.</p>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Summary Tab -->
+    <div class="summary-panel d-none" id="ai-summary">
+      <div class="p-3">
+        <button type="button" class="btn btn-primary-edu w-100 mb-3" id="ai-summary-btn" onclick="generateAiSummary()">
+          <span id="ai-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
+          <i class="bi bi-lightning-fill me-2"></i>Generate AI Summary
+        </button>
+        <div id="ai-summary-content">
+          {% if summary.ai_summary %}
+            {% include 'notebooks/partials/notes_summary.html' %}
+          {% else %}
+            <p class="text-muted small">Click the button above to generate an AI-powered summary of your material.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Feedback Tab -->
+    <div class="summary-panel d-none" id="feedback-content">
+      {% if summary.feedback_text %}
+        <div class="p-3">
+          {% include 'notebooks/partials/summary_feedback.html' %}
+        </div>
+      {% else %}
+        <div class="p-4 text-center text-muted">
+          <i class="bi bi-chat-dots display-6 mb-3 d-block"></i>
+          <p>No feedback yet. Write your summary first and get feedback!</p>
+        </div>
+      {% endif %}
+    </div>
+
+    </div>{# end .summary-tab-content #}
+  </div>{# end .summary-layout #}
+</div>
+
+<!-- PDF Viewer Modal -->
+<div class="modal fade" id="pdfViewerModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-centered" style="height:90vh;">
+    <div class="modal-content h-100" style="background:var(--bg-surface);border:1px solid var(--bg-border);">
+      <div class="modal-header py-2" style="border-bottom:1px solid var(--bg-border);">
+        <h6 class="modal-title fw-semibold mb-0">
+          <i class="bi bi-file-earmark-text me-2 text-accent"></i>{{ notebook.title }}
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0 h-100">
+        <iframe src="{{ notebook.pdf_file.url }}" width="100%" height="100%"
+                style="border:none;display:block;min-height:75vh;"
+                title="Source PDF"></iframe>
+        <div class="p-3 border-top" style="border-color:var(--bg-border) !important;">
+          <a href="{{ notebook.pdf_file.url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-box-arrow-up-right me-1"></i>Open PDF in New Tab
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- hidden fields for session logging -->
+<form id="session-form" method="post" action="{% url 'notebooks:log_session' notebook.pk %}">
+  {% csrf_token %}
+  <input type="hidden" name="focus_duration" value="{{ focus_duration }}">
+  <input type="hidden" name="break_duration" value="{{ break_duration }}">
+  <input type="hidden" name="cycles_completed" id="cycles-input" value="0">
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js" onload="document.dispatchEvent(new Event('markedReady'))"></script>
+<script>
+  const FOCUS_MINS = {{ focus_duration }};
+  const BREAK_MINS = {{ break_duration }};
+  const NOTEBOOK_PK = {{ notebook.pk }};
+  const INITIAL_HTML = '{{ notebook.notes_html|default:""|escapejs }}';
+
+  // ── Notes state ─────────────────────────────────────
+  let quill = null;
+  let richMode = Boolean('{{ notebook.notes_html|default:""|escapejs }}'.trim());
+  let notesEditMode = false;  // false = formatted view, true = plain textarea
+  const CSRF = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('csrftoken='))?.split('=')[1]||'';
+
+  // Render extracted text with original line breaks to mirror PDF flow.
+  function notesTextToHtml(text) {
+    if (!text || !text.trim()) {
+      return '<p class="notes-placeholder">Your notes will appear here after processing…</p>';
+    }
+    const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<pre class="notes-pre">${esc(text)}</pre>`;
+  }
+
+  function renderNotesView() {
+    const ta = document.getElementById('plain-notes');
+    document.getElementById('notes-render').innerHTML = notesTextToHtml(ta.value);
+  }
+
+  function toggleNotesView() {
+    notesEditMode = !notesEditMode;
+    const render = document.getElementById('notes-render');
+    const ta     = document.getElementById('plain-notes');
+    const btn    = document.getElementById('notes-edit-btn');
+    if (notesEditMode) {
+      render.classList.add('d-none');
+      ta.classList.remove('d-none');
+      btn.querySelector('i').className = 'bi bi-eye';
+      btn.title = 'View formatted notes';
+      ta.focus();
+    } else {
+      renderNotesView();
+      ta.classList.add('d-none');
+      render.classList.remove('d-none');
+      btn.querySelector('i').className = 'bi bi-pencil';
+      btn.title = 'Edit notes';
+    }
+  }
+
+  // ── Quill rich-text editor ──────────────────────────
+  function initQuill() {
+    if (quill) return;
+    quill = new Quill('#quill-editor', {
+      theme: 'snow',
+      modules: { toolbar: [
+        [{ header: [1, 2, 3, false] }],
+        ['bold', 'italic', 'underline'],
+        [{ list: 'ordered' }, { list: 'bullet' }],
+        ['blockquote', 'code-block'],
+        ['clean'],
+      ]},
+      placeholder: 'Your notes will appear here…',
+    });
+    if (INITIAL_HTML) quill.root.innerHTML = INITIAL_HTML;
+    let saveTimer = null;
+    quill.on('text-change', () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveRichNotes, 1500);
+    });
+  }
+
+  function saveRichNotes() {
+    const html = quill.root.innerHTML;
+    const text = quill.getText();
+    const fd = new FormData();
+    fd.append('notes_html', html);
+    fd.append('notes_content', text);
+    fetch(`/notebooks/${NOTEBOOK_PK}/save-notes/`, {
+      method: 'POST',
+      headers: {'X-CSRFToken': CSRF},
+      body: fd,
+    }).then(r => r.text()).then(h => {
+      document.getElementById('notes-save-indicator').innerHTML = h;
+    }).catch(() => {});
+  }
+
+  function toggleEditor() {
+    richMode = !richMode;
+    const quillEl  = document.getElementById('quill-editor');
+    const renderEl = document.getElementById('notes-render');
+    const taEl     = document.getElementById('plain-notes');
+    const editBtn  = document.getElementById('notes-edit-btn');
+    if (richMode) {
+      quillEl.classList.remove('d-none');
+      renderEl.classList.add('d-none');
+      taEl.classList.add('d-none');
+      if (editBtn) editBtn.classList.add('d-none');
+      initQuill();
+    } else {
+      quillEl.classList.add('d-none');
+      notesEditMode = false;
+      renderNotesView();
+      renderEl.classList.remove('d-none');
+      taEl.classList.add('d-none');
+      if (editBtn) editBtn.classList.remove('d-none');
+    }
+  }
+
+  function runInlineScripts(container) {
+    const scripts = container.querySelectorAll('script');
+    scripts.forEach(oldScript => {
+      const newScript = document.createElement('script');
+      Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+      newScript.textContent = oldScript.textContent;
+      oldScript.parentNode.replaceChild(newScript, oldScript);
+    });
+  }
+
+  function switchSummaryTab(panelId, btn) {
+    document.querySelectorAll('.summary-panel').forEach(p => p.classList.add('d-none'));
+    document.querySelectorAll('.summary-tab-btn').forEach(b => b.classList.remove('active'));
+    const panel = document.getElementById(panelId);
+    if (panel) panel.classList.remove('d-none');
+    if (btn) btn.classList.add('active');
+  }
+
+  function generateAiSummary() {
+    const btn = document.getElementById('ai-summary-btn');
+    const spinner = document.getElementById('ai-spinner');
+    const target = document.getElementById('ai-summary-content');
+    if (!btn || !spinner || !target) return;
+
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    fetch('{% url "notebooks:notes_summary" notebook.pk %}', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': CSRF },
+    })
+    .then(async r => {
+      const html = await r.text();
+      if (!r.ok) {
+        throw new Error(html || `Request failed (${r.status})`);
+      }
+      return html;
+    })
+    .then(html => {
+      target.innerHTML = html;
+      runInlineScripts(target);
+      if (window.htmx) htmx.process(target);
+    })
+    .catch((err) => {
+      target.innerHTML = `<div class="alert alert-danger py-2 px-3 small mb-0">Error generating summary. ${err.message || 'Please try again.'}</div>`;
+    })
+    .finally(() => {
+      btn.disabled = false;
+      spinner.classList.add('d-none');
+    });
+  }
+
+  function getFeedback() {
+    const btn = document.getElementById('feedback-btn');
+    const spinner = document.getElementById('summary-spinner');
+    const target = document.getElementById('summary-feedback-area');
+    const summaryEl = document.getElementById('summary-textarea');
+    if (!btn || !spinner || !target || !summaryEl) return;
+
+    const summaryText = summaryEl.value;
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    const fd = new FormData();
+    fd.append('user_summary', summaryText);
+    fetch('{% url "notebooks:summary_feedback" notebook.pk %}', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': CSRF },
+      body: fd,
+    })
+    .then(async r => {
+      const html = await r.text();
+      if (!r.ok) {
+        throw new Error(html || `Request failed (${r.status})`);
+      }
+      return html;
+    })
+    .then(html => {
+      target.innerHTML = html;
+      if (window.htmx) htmx.process(target);
+    })
+    .catch((err) => {
+      target.innerHTML = `<div class="alert alert-danger py-2 px-3 small mb-0">Error getting feedback. ${err.message || 'Please try again.'}</div>`;
+    })
+    .finally(() => {
+      btn.disabled = false;
+      spinner.classList.add('d-none');
+    });
+  }
+
+  // Expose for inline onclick handlers used in template/partials.
+  window.switchSummaryTab = switchSummaryTab;
+  window.generateAiSummary = generateAiSummary;
+  window.getFeedback = getFeedback;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    try {
+      if (richMode) {
+        initQuill();
+      } else {
+        // Populate the formatted read view on load.
+        renderNotesView();
+      }
+    } catch (err) {
+      console.error('Notebook UI initialization error:', err);
+    }
+  });
+</script>
+<script src="/static/js/timer.js"></script>
+<script src="/static/js/cornote.js"></script>
+<script src="/static/js/features.js"></script>
+{% endblock %}

@@ -1,0 +1,294 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Preferences | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:960px;margin:0 auto;">
+
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
+        <div>
+            <h1 class="h4 fw-bold mb-0"><i class="bi bi-sliders me-2 text-accent"></i>Preferences</h1>
+            <p class="text-muted small mb-0">Customize your study environment</p>
+        </div>
+        <a href="{% url 'notebooks:dashboard' %}" class="btn btn-ghost btn-sm">
+            <i class="bi bi-arrow-left me-1"></i>Back to Notebooks
+        </a>
+    </div>
+
+    <div class="row g-3">
+        <!-- Sidebar Navigation -->
+        <div class="col-md-3">
+            <div class="cornote-card p-2">
+                <button class="btn btn-ghost w-100 text-start pref-tab-btn active mb-1" data-tab="theme">
+                    <i class="bi bi-palette me-2"></i>Theme & Colors
+                </button>
+                <button class="btn btn-ghost w-100 text-start pref-tab-btn mb-1" data-tab="accessibility">
+                    <i class="bi bi-universal-access me-2"></i>Accessibility
+                </button>
+                <button class="btn btn-ghost w-100 text-start pref-tab-btn mb-1" data-tab="notifications">
+                    <i class="bi bi-bell me-2"></i>Notifications
+                </button>
+                <button class="btn btn-ghost w-100 text-start pref-tab-btn" data-tab="study">
+                    <i class="bi bi-book me-2"></i>Study Preferences
+                </button>
+            </div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="col-md-9">
+            <!-- Theme Tab -->
+            <div class="pref-panel" id="theme-tab">
+                <div class="cornote-card">
+                    <div class="card-header" style="background:var(--bg-elevated);border-bottom:1px solid var(--bg-border)">
+                        <h5 class="mb-0">Theme & Colors</h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Theme Selection -->
+                        <div class="mb-4">
+                            <label class="form-label">Theme Mode</label>
+                            <div class="btn-group w-100" role="group">
+                                <input type="radio" class="btn-check" name="theme" id="theme-light" value="light">
+                                <label class="btn btn-outline-primary" for="theme-light">
+                                    <i class="bi bi-sun"></i> Light
+                                </label>
+                                
+                                <input type="radio" class="btn-check" name="theme" id="theme-dark" value="dark">
+                                <label class="btn btn-outline-primary" for="theme-dark">
+                                    <i class="bi bi-moon"></i> Dark
+                                </label>
+                                
+                                <input type="radio" class="btn-check" name="theme" id="theme-auto" value="auto" checked>
+                                <label class="btn btn-outline-primary" for="theme-auto">
+                                    <i class="bi bi-circle-half"></i> Auto
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Font Size -->
+                        <div class="mb-4">
+                            <label class="form-label">Font Size</label>
+                            <select class="form-select" id="fontSize">
+                                <option value="small">Small</option>
+                                <option value="normal" selected>Normal</option>
+                                <option value="large">Large</option>
+                                <option value="xlarge">Extra Large</option>
+                            </select>
+                            <small class="text-muted">Adjust text size for better readability</small>
+                        </div>
+
+                        <!-- High Contrast -->
+                        <div class="form-check form-switch mb-4">
+                            <input class="form-check-input" type="checkbox" id="highContrast">
+                            <label class="form-check-label" for="highContrast">
+                                Enable High Contrast Mode
+                            </label>
+                            <small class="d-block text-muted mt-1">Improves visibility for color-blind users</small>
+                        </div>
+
+                        <button class="btn btn-accent" onclick="savePreferences()">
+                            <i class="bi bi-check-circle"></i> Save Changes
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Accessibility Tab -->
+            <div class="pref-panel d-none" id="accessibility-tab">
+                <div class="cornote-card">
+                    <div class="card-header" style="background:var(--bg-elevated);border-bottom:1px solid var(--bg-border)">
+                        <h5 class="mb-0">Accessibility Options</h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Animations -->
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="reduceAnimations">
+                            <label class="form-check-label" for="reduceAnimations">
+                                Reduce Motion
+                            </label>
+                            <small class="d-block text-muted">Disable animations for those sensitive to motion</small>
+                        </div>
+
+                        <!-- Reading / Distraction-free Mode -->
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="readingMode">
+                            <label class="form-check-label" for="readingMode">
+                                Distraction-free Reading Mode
+                            </label>
+                            <small class="d-block text-muted">Hides the sidebar and extra UI while studying</small>
+                        </div>
+
+                        <button class="btn btn-accent" onclick="savePreferences()">
+                            <i class="bi bi-check-circle"></i> Save Changes
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notifications Tab -->
+            <div class="pref-panel d-none" id="notifications-tab">
+                <div class="cornote-card">
+                    <div class="card-header" style="background:var(--bg-elevated);border-bottom:1px solid var(--bg-border)">
+                        <h5 class="mb-0">Notification Settings</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="enableNotifications" checked>
+                            <label class="form-check-label" for="enableNotifications">
+                                Enable Notifications
+                            </label>
+                        </div>
+
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="streakNotifications" checked>
+                            <label class="form-check-label" for="streakNotifications">
+                                Study Streak Notifications
+                            </label>
+                        </div>
+
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="reviewReminders" checked>
+                            <label class="form-check-label" for="reviewReminders">
+                                Review Reminders
+                            </label>
+                        </div>
+
+                        <button class="btn btn-accent" onclick="savePreferences()">
+                            <i class="bi bi-check-circle"></i> Save Changes
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Study Preferences Tab -->
+            <div class="pref-panel d-none" id="study-tab">
+                <div class="cornote-card">
+                    <div class="card-header" style="background:var(--bg-elevated);border-bottom:1px solid var(--bg-border)">
+                        <h5 class="mb-0">Study Preferences</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Default Focus Duration</label>
+                            <input type="number" class="form-control" id="focusDuration" min="5" max="60" value="25">
+                            <small class="text-muted">Minutes for Pomodoro focus sessions</small>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Default Break Duration</label>
+                            <input type="number" class="form-control" id="breakDuration" min="1" max="30" value="5">
+                            <small class="text-muted">Minutes for short breaks</small>
+                        </div>
+
+                        <button class="btn btn-accent" onclick="savePreferences()">
+                            <i class="bi bi-check-circle"></i> Save Changes
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function getCsrf() {
+    const match = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('csrftoken='));
+    return match ? match.split('=')[1] : '';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadPreferences();
+
+    document.querySelectorAll('.pref-tab-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            switchTab(this.getAttribute('data-tab'));
+        });
+    });
+});
+
+async function loadPreferences() {
+    try {
+        const response = await fetch('/notebooks/api/preferences/');
+        const prefs = await response.json();
+
+        const themeEl = document.getElementById('theme-' + prefs.theme);
+        if (themeEl) themeEl.checked = true;
+
+        const fontSizeEl = document.getElementById('fontSize');
+        if (fontSizeEl) fontSizeEl.value = prefs.font_size || 'normal';
+
+        document.getElementById('highContrast').checked = !!prefs.high_contrast;
+        document.getElementById('reduceAnimations').checked = !!prefs.reduce_animations;
+        document.getElementById('readingMode').checked = !!prefs.reading_mode;
+
+        const notifEl = document.getElementById('enableNotifications');
+        if (notifEl) notifEl.checked = prefs.enable_notifications !== false;
+
+    } catch (error) {
+        console.error('Error loading preferences:', error);
+    }
+}
+
+async function savePreferences() {
+    const data = {
+        theme: document.querySelector('input[name="theme"]:checked')?.value || 'dark',
+        font_size: document.getElementById('fontSize').value,
+        high_contrast: document.getElementById('highContrast').checked,
+        reduce_animations: document.getElementById('reduceAnimations').checked,
+        reading_mode: document.getElementById('readingMode').checked,
+        enable_notifications: document.getElementById('enableNotifications').checked,
+    };
+
+    try {
+        const response = await fetch('/notebooks/api/preferences/update/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrf(),
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data),
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            showSaveSuccess();
+        } else {
+            showSaveError();
+        }
+    } catch (error) {
+        console.error('Error saving preferences:', error);
+        showSaveError();
+    }
+}
+
+function showSaveSuccess() {
+    const el = document.createElement('div');
+    el.className = 'alert alert-success alert-dismissible fade show mt-3';
+    el.innerHTML = '<i class="bi bi-check-circle me-2"></i>Preferences saved<button class="btn-close" data-bs-dismiss="alert"></button>';
+    document.querySelector('.container-fluid').prepend(el);
+    setTimeout(() => el.remove(), 3000);
+}
+
+function showSaveError() {
+    const el = document.createElement('div');
+    el.className = 'alert alert-danger alert-dismissible fade show mt-3';
+    el.innerHTML = '<i class="bi bi-exclamation-circle me-2"></i>Failed to save preferences<button class="btn-close" data-bs-dismiss="alert"></button>';
+    document.querySelector('.container-fluid').prepend(el);
+}
+
+function switchTab(tabName) {
+    document.querySelectorAll('.pref-panel').forEach(tab => tab.classList.add('d-none'));
+    document.querySelectorAll('.pref-tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.getElementById(tabName + '-tab').classList.remove('d-none');
+    document.querySelector(`.pref-tab-btn[data-tab="${tabName}"]`).classList.add('active');
+}
+</script>
+
+<style>
+.pref-tab-btn.active {
+    background: var(--bg-elevated) !important;
+    color: var(--text-primary) !important;
+}
+.pref-panel.d-none { display: none !important; }
+</style>
+{% endblock %}

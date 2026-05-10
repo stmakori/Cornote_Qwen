@@ -1,0 +1,10 @@
+Django==5.1.4
+python-decouple==3.8
+pdfplumber==0.11.4
+openai==1.54.4
+whitenoise==6.8.2
+Pillow==11.0.0
+django-htmx==1.21.0
+reportlab==4.5.0
+pytesseract==0.3.13
+genanki==0.13.0

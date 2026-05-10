@@ -1,0 +1,114 @@
+{% if error %}
+  <div class="alert alert-danger" role="alert">
+    <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
+  </div>
+{% else %}
+  <div class="summary-box">
+    <div class="summary-header mb-3">
+      <h5 class="fw-bold mb-0">
+        <i class="bi bi-file-earmark-text me-2 text-primary-edu"></i>AI Summary
+      </h5>
+      <small class="text-muted">Auto-generated overview of your material</small>
+    </div>
+    
+    {% if summary.ai_summary %}
+      {{ summary.ai_summary|json_script:"ai-summary-data" }}
+      <div id="ai-summary-body" class="summary-content p-3 rounded"
+           style="background:var(--bg-elevated);line-height:1.8;max-height:400px;overflow-y:auto;font-size:.88rem;"></div>
+      <script>
+        (function(){
+          const text = JSON.parse(document.getElementById('ai-summary-data').textContent);
+          const el = document.getElementById('ai-summary-body');
+          function render() { el.innerHTML = marked.parse(text); }
+          if (window.marked) { render(); }
+          else { document.addEventListener('markedReady', render); }
+        })();
+      </script>
+      
+      <div class="mt-3 d-flex gap-2 flex-wrap">
+        <button class="btn btn-sm btn-outline-primary" id="copy-summary-btn" onclick="copySummaryToClipboard()">
+          <i class="bi bi-clipboard me-1"></i>Copy
+        </button>
+        
+        <button class="btn btn-sm btn-outline-accent" id="audio-summary-btn" onclick="generateAudioSummary()">
+          <span id="audio-spinner" class="spinner-border spinner-border-sm me-1" style="display:none;"></span>
+          <i class="bi bi-volume-up me-1"></i>Audio Summary
+        </button>
+        
+        {% if summary.audio_file %}
+          <a href="{{ summary.audio_file.url }}" class="btn btn-sm btn-success-edu" download>
+            <i class="bi bi-download me-1"></i>Download MP3
+          </a>
+        {% endif %}
+      </div>
+      
+      <div id="audio-summary-container" class="mt-3"></div>
+    {% else %}
+      <p class="text-muted small mb-0">Summary will be generated when you request it.</p>
+    {% endif %}
+  </div>
+{% endif %}
+
+<script>
+function copySummaryToClipboard() {
+  const summaryText = document.querySelector('.summary-content').innerText;
+  navigator.clipboard.writeText(summaryText).then(() => {
+    const btn = document.getElementById('copy-summary-btn');
+    const original = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-check me-1"></i>Copied!';
+    setTimeout(() => { btn.innerHTML = original; }, 2000);
+  });
+}
+
+function generateAudioSummary() {
+  const btn = document.getElementById('audio-summary-btn');
+  const spinner = document.getElementById('audio-spinner');
+  const notebookPk = document.querySelector('[data-notebook-pk]')?.dataset.notebookPk || window.NOTEBOOK_PK;
+  
+  spinner.style.display = 'inline-block';
+  btn.disabled = true;
+  
+  const csrf = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('csrftoken='))?.split('=')[1]||'';
+  fetch(`/notebooks/${notebookPk}/audio-summary/`, {
+    method: 'POST',
+    headers: { 'X-CSRFToken': csrf },
+  })
+  .then(res => res.json())
+  .then(data => {
+    spinner.style.display = 'none';
+    btn.disabled = false;
+    
+    if (data.success) {
+      const container = document.getElementById('audio-summary-container');
+      container.innerHTML = `
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+          <i class="bi bi-check-circle me-2"></i>${data.message}
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        <div class="mt-3">
+          <audio controls style="width: 100%; height: 40px; border-radius: 6px;">
+            <source src="${data.audio_url}" type="audio/mpeg">
+            Your browser does not support the audio element.
+          </audio>
+          <div class="mt-2">
+            <a href="${data.audio_url}" download class="btn btn-sm btn-outline-primary">
+              <i class="bi bi-download me-1"></i>Download MP3
+            </a>
+          </div>
+        </div>
+      `;
+      btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Audio Ready';
+    } else {
+      const container = document.getElementById('audio-summary-container');
+      container.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+      btn.innerHTML = '<i class="bi bi-volume-up me-1"></i>Audio Summary';
+    }
+  })
+  .catch(err => {
+    spinner.style.display = 'none';
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-exclamation-circle me-1"></i>Error';
+    console.error('Audio generation error:', err);
+  });
+}
+</script>

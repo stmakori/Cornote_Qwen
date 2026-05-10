@@ -1,0 +1,209 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Analytics | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:1200px;margin:0 auto;">
+
+    <!-- Page Header -->
+    <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
+        <div>
+            <h1 class="h4 fw-bold mb-0"><i class="bi bi-bar-chart-line me-2 text-accent"></i>Learning Analytics</h1>
+            <p class="text-muted small mb-0">Track your progress and study patterns</p>
+        </div>
+        <a href="{% url 'notebooks:dashboard' %}" class="btn btn-ghost btn-sm">
+            <i class="bi bi-arrow-left me-1"></i>Back to Notebooks
+        </a>
+    </div>
+
+    <!-- Key Metrics Row -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="cornote-card p-3 text-center">
+                <i class="bi bi-question-circle fs-3 mb-2" style="color:var(--primary)"></i>
+                <div class="h3 fw-bold mb-0" id="totalQuestions">-</div>
+                <div class="text-muted small">Questions Answered</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="cornote-card p-3 text-center">
+                <i class="bi bi-bullseye fs-3 mb-2" style="color:var(--secondary)"></i>
+                <div class="h3 fw-bold mb-0" id="accuracy">-</div>
+                <div class="text-muted small">Accuracy</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="cornote-card p-3 text-center">
+                <i class="bi bi-fire fs-3 mb-2" style="color:var(--accent)"></i>
+                <div class="h3 fw-bold mb-0" id="streak">-</div>
+                <div class="text-muted small">Day Streak</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="cornote-card p-3 text-center">
+                <i class="bi bi-clock-history fs-3 mb-2" style="color:#06b6d4"></i>
+                <div class="h3 fw-bold mb-0" id="studyTime">-</div>
+                <div class="text-muted small">Minutes Studied</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="row g-3 mb-4">
+        <div class="col-lg-8">
+            <div class="cornote-card p-3 h-100">
+                <h6 class="fw-semibold mb-3"><i class="bi bi-calendar-week me-2 text-muted"></i>Weekly Study Activity</h6>
+                <canvas id="weeklyChart" height="80"></canvas>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="cornote-card p-3 h-100">
+                <h6 class="fw-semibold mb-3"><i class="bi bi-pie-chart me-2 text-muted"></i>Performance Breakdown</h6>
+                <canvas id="performanceChart" height="180"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Performance by Notebook -->
+    <div class="cornote-card p-3">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+            <h6 class="fw-semibold mb-0"><i class="bi bi-journal-bookmark me-2 text-muted"></i>Performance by Notebook</h6>
+            <span class="badge bg-secondary" id="notebookCount">0</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm mb-0" style="color:var(--text-primary)">
+                <thead style="border-bottom:1px solid var(--bg-border)">
+                    <tr class="text-muted" style="font-size:.8rem;">
+                        <th>Notebook</th>
+                        <th>Questions</th>
+                        <th>Correct</th>
+                        <th>Accuracy</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="notebookTable">
+                    <tr><td colspan="5" class="text-center text-muted py-4">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadAnalytics();
+});
+
+async function loadAnalytics() {
+    try {
+        const response = await fetch('/notebooks/api/analytics/');
+        const data = await response.json();
+        
+        // Update key metrics
+        document.getElementById('totalQuestions').textContent = data.overall.total_questions;
+        document.getElementById('accuracy').textContent = data.overall.accuracy_percentage.toFixed(1) + '%';
+        document.getElementById('streak').textContent = data.overall.streak_days + ' days';
+        document.getElementById('studyTime').textContent = data.overall.study_minutes + ' min';
+        
+        // Update notebook table
+        const tableBody = document.getElementById('notebookTable');
+        tableBody.innerHTML = '';
+        
+        document.getElementById('notebookCount').textContent = data.by_notebook.length;
+        
+        if (data.by_notebook.length === 0) {
+            tableBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No graded answers yet - open a notebook and grade your answers!</td></tr>';
+        }
+        data.by_notebook.forEach(nb => {
+            const pct = nb.accuracy_percentage.toFixed(1);
+            const statusBadge = nb.accuracy_percentage >= 80
+                ? '<span class="badge bg-success">Excellent</span>'
+                : nb.accuracy_percentage >= 60
+                    ? '<span class="badge bg-warning text-dark">Good</span>'
+                    : '<span class="badge bg-danger">Needs Work</span>';
+            const row = `
+                <tr style="border-bottom:1px solid var(--bg-border)">
+                    <td class="fw-semibold">${nb.notebook_title}</td>
+                    <td>${nb.total_questions}</td>
+                    <td>${nb.correct_answers}</td>
+                    <td>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="progress flex-grow-1" style="height:6px;background:var(--bg-elevated)">
+                                <div class="progress-bar bg-accent" style="width:${pct}%"></div>
+                            </div>
+                            <small class="text-muted">${pct}%</small>
+                        </div>
+                    </td>
+                    <td>${statusBadge}</td>
+                </tr>
+            `;
+            tableBody.innerHTML += row;
+        });
+        
+        // Weekly chart
+        const weeklyLabels = Object.keys(data.weekly).map(k => {
+            const date = new Date(data.weekly[k].date);
+            return date.toLocaleDateString('en-US', { weekday: 'short' });
+        });
+        const weeklyMinutes = Object.values(data.weekly).map(w => w.minutes_studied);
+        
+        const ctxWeekly = document.getElementById('weeklyChart').getContext('2d');
+        new Chart(ctxWeekly, {
+            type: 'bar',
+            data: {
+                labels: weeklyLabels,
+                datasets: [{
+                    label: 'Minutes Studied',
+                    data: weeklyMinutes,
+                    backgroundColor: '#2563eb',
+                    borderRadius: 6,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { color: '#94a3b8' },
+                        grid: { color: '#334155' }
+                    },
+                    x: {
+                        ticks: { color: '#94a3b8' },
+                        grid: { display: false }
+                    }
+                }
+            }
+        });
+        
+        // Performance pie
+        const ctxPie = document.getElementById('performanceChart').getContext('2d');
+        new Chart(ctxPie, {
+            type: 'doughnut',
+            data: {
+                labels: ['Correct', 'Partial', 'Incorrect'],
+                datasets: [{
+                    data: [
+                        data.overall.total_correct,
+                        data.overall.total_partial,
+                        data.overall.total_incorrect
+                    ],
+                    backgroundColor: ['#059669', '#f59e0b', '#ef4444']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom', labels: { color: '#f1f5f9' } }
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error loading analytics:', error);
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,88 @@
+<!-- ── Sidebar nav ── -->
+<div class="q-sidebar">
+  <div class="q-sidebar-header">Cues</div>
+  {% for question, answer in graded %}
+  <button class="q-nav-btn{% if forloop.first %} active{% endif %}"
+          id="qnav-{{ question.pk }}"
+          onclick="selectQuestion({{ question.pk }})"
+          title="{{ question.question_text|truncatechars:80 }}">
+    <span class="q-nav-num">{{ question.order_index }}</span>
+    {% if answer.grade == 'correct' %}<span class="q-dot q-dot-correct"></span>
+    {% elif answer.grade == 'partial' %}<span class="q-dot q-dot-partial"></span>
+    {% elif answer.grade == 'incorrect' %}<span class="q-dot q-dot-incorrect"></span>
+    {% endif %}
+  </button>
+  {% empty %}
+  <div class="text-muted text-center py-2" style="font-size:.6rem;">-</div>
+  {% endfor %}
+</div>
+
+<!-- ── Detail pane ── -->
+<div class="q-detail">
+  <div class="q-detail-header">
+    <i class="bi bi-check2-all me-1 text-accent"></i>
+    <span id="q-detail-label">Results</span>
+    <span class="ms-auto text-muted" style="font-size:.7rem;">{{ graded|length }} graded</span>
+  </div>
+
+  {% for question, answer in graded %}
+  <div class="question-block{% if not forloop.first %} d-none{% endif %}"
+       id="question-{{ question.pk }}"
+       data-pk="{{ question.pk }}"
+       data-index="{{ forloop.counter0 }}">
+
+    <span class="question-number">Q{{ question.order_index }}</span>
+    <p class="question-text mt-1">{{ question.question_text }}</p>
+
+    <textarea
+      class="answer-input w-100"
+      name="user_answer"
+      rows="4"
+      hx-post="{% url 'notebooks:save_answer' question.pk %}"
+      hx-trigger="keyup changed delay:1200ms"
+      hx-target="#save-ind-{{ question.pk }}"
+      hx-swap="innerHTML"
+    >{{ answer.user_answer }}</textarea>
+
+    <div class="d-flex align-items-center justify-content-between mt-2">
+      <span id="save-ind-{{ question.pk }}" class="save-indicator"></span>
+      <span class="badge bg-{{ answer.badge_color }} grade-badge">
+        {% if answer.grade == 'correct' %}<i class="bi bi-check-circle me-1"></i>Correct
+        {% elif answer.grade == 'partial' %}<i class="bi bi-dash-circle me-1"></i>Partially Correct
+        {% elif answer.grade == 'incorrect' %}<i class="bi bi-x-circle me-1"></i>Incorrect
+        {% else %}<i class="bi bi-dash me-1"></i>Ungraded{% endif %}
+      </span>
+    </div>
+
+    {% if answer.feedback %}
+    <div class="feedback-bubble mt-2">
+      <i class="bi bi-chat-left-text me-1"></i>{{ answer.feedback }}
+    </div>
+    {% endif %}
+
+    <!-- Prev / Next -->
+    <div class="d-flex justify-content-between mt-3 pt-2" style="border-top:1px solid var(--bg-border);">
+      <button class="btn btn-ghost btn-sm" onclick="navigateQ(-1)" {% if forloop.first %}disabled{% endif %}>
+        <i class="bi bi-chevron-left me-1"></i>Prev
+      </button>
+      <button class="btn btn-ghost btn-sm" onclick="navigateQ(1)" {% if forloop.last %}disabled{% endif %}>
+        Next<i class="bi bi-chevron-right ms-1"></i>
+      </button>
+    </div>
+  </div>
+  {% empty %}
+  <p class="text-muted small text-center py-4 px-3">No questions found.</p>
+  {% endfor %}
+
+  <!-- Re-grade -->
+  <div class="p-3 mt-2" style="border-top:1px solid var(--bg-border);">
+    <button class="btn btn-sm btn-outline-accent w-100"
+            hx-post="{% url 'notebooks:grade_answers' notebook.pk %}"
+            hx-target="#questions-column"
+            hx-swap="innerHTML"
+            hx-indicator="#grade-spinner">
+      <span id="grade-spinner" class="htmx-indicator spinner-border spinner-border-sm me-1"></span>
+      <i class="bi bi-arrow-repeat me-1"></i>Re-grade All
+    </button>
+  </div>
+</div>

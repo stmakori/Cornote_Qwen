@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Achievements | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:1100px;margin:0 auto;">
+
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
+        <div>
+            <h1 class="h4 fw-bold mb-0"><i class="bi bi-trophy me-2 text-accent"></i>Achievements</h1>
+            <p class="text-muted small mb-0">Unlock badges and milestones as you study</p>
+        </div>
+        <a href="{% url 'notebooks:dashboard' %}" class="btn btn-ghost btn-sm">
+            <i class="bi bi-arrow-left me-1"></i>Back to Notebooks
+        </a>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-4">
+            <div class="cornote-card p-3 text-center">
+                <i class="bi bi-award fs-3 mb-2 text-accent d-block"></i>
+                <div class="h3 fw-bold mb-0" id="badgeCount">-</div>
+                <div class="text-muted small">Badges Earned</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-4">
+            <div class="cornote-card p-3 text-center">
+                <i class="bi bi-fire fs-3 mb-2 d-block" style="color:var(--accent)"></i>
+                <div class="h3 fw-bold mb-0" id="streakCount">-</div>
+                <div class="text-muted small">Day Streak</div>
+            </div>
+        </div>
+        <div class="col-12 col-md-4">
+            <div class="cornote-card p-3 text-center">
+                <i class="bi bi-star fs-3 mb-2 d-block" style="color:#f59e0b"></i>
+                <div class="h3 fw-bold mb-0" id="totalPoints">-</div>
+                <div class="text-muted small">Total Points</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Badges Grid -->
+    <div class="row g-3" id="badgesContainer">
+        <div class="col-12 text-center py-5">
+            <p class="text-muted">Loading achievements…</p>
+        </div>
+    </div>
+</div>
+
+<script>
+function getCsrf() {
+    const match = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('csrftoken='));
+    return match ? match.split('=')[1] : '';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadAchievements();
+    checkNewAchievements();
+    loadStreak();
+});
+
+async function loadStreak() {
+    try {
+        const r = await fetch('/notebooks/api/analytics/');
+        const d = await r.json();
+        document.getElementById('streakCount').textContent = d.overall.streak_days;
+        document.getElementById('totalPoints').textContent = d.overall.total_correct;
+    } catch (e) {}
+}
+
+async function loadAchievements() {
+    try {
+        const response = await fetch('/notebooks/api/achievements/');
+        const data = await response.json();
+
+        document.getElementById('badgeCount').textContent = data.total_badges;
+
+        const container = document.getElementById('badgesContainer');
+        container.innerHTML = '';
+
+        if (data.badges.length === 0) {
+            container.innerHTML = '<div class="col-12 text-center py-5"><i class="bi bi-trophy display-3 text-muted mb-3 d-block"></i><p class="text-muted">Keep studying to unlock badges!</p></div>';
+            return;
+        }
+
+        data.badges.forEach(badge => {
+            const badgeHTML = `
+                <div class="col-md-4 col-lg-3 mb-4">
+                    <div class="cornote-card h-100 text-center badge-card" style="border-left: 4px solid ${badge.color};">
+                        <div class="p-4">
+                            <i class="bi ${badge.icon} fs-1" style="color: ${badge.color};"></i>
+                            <h5 class="mt-3 fw-semibold">${badge.name}</h5>
+                            <p class="text-muted small">${badge.description}</p>
+                            <small class="text-success"><i class="bi bi-check-circle me-1"></i>Unlocked</small>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.innerHTML += badgeHTML;
+        });
+
+    } catch (error) {
+        console.error('Error loading achievements:', error);
+    }
+}
+
+async function checkNewAchievements() {
+    try {
+        const response = await fetch('/notebooks/api/achievements/check/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': getCsrf() }
+        });
+        const data = await response.json();
+        if (data.new_badges_earned > 0) {
+            loadAchievements();
+        }
+    } catch (error) {
+        console.error('Error checking achievements:', error);
+    }
+}
+</script>
+
+<style>
+.badge-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.badge-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15) !important;
+}
+</style>
+{% endblock %}

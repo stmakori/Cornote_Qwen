@@ -1,0 +1,137 @@
+{% extends 'base.html' %}
+{% block title %}Study Groups | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:1100px;margin:0 auto;">
+
+  <!-- Header -->
+  <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
+    <div>
+      <h1 class="h4 fw-bold mb-0"><i class="bi bi-people-fill me-2 text-accent"></i>Study Groups</h1>
+      <p class="text-muted small mb-0">Collaborate and discuss with other learners</p>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-ghost btn-sm" data-bs-toggle="modal" data-bs-target="#joinModal">
+        <i class="bi bi-box-arrow-in-right me-1"></i>Join Group
+      </button>
+      <button class="btn btn-accent btn-sm" data-bs-toggle="modal" data-bs-target="#createModal">
+        <i class="bi bi-plus-lg me-1"></i>Create Group
+      </button>
+    </div>
+  </div>
+
+  <!-- My Groups -->
+  <h6 class="text-muted fw-semibold mb-3 text-uppercase" style="font-size:.7rem;letter-spacing:.08em;">My Groups ({{ my_groups.count }})</h6>
+
+  {% if my_groups %}
+  <div class="row g-3 mb-5">
+    {% for group in my_groups %}
+    <div class="col-sm-6 col-lg-4">
+      <a href="{% url 'notebooks:study_group_detail_page' group.id %}" class="cornote-card d-block p-4 text-decoration-none h-100">
+        <div class="d-flex align-items-start justify-content-between mb-2">
+          <h6 class="fw-semibold mb-0">{{ group.name }}</h6>
+          {% if group.is_public %}
+            <span class="badge bg-success" style="font-size:.65rem;">Public</span>
+          {% else %}
+            <span class="badge bg-secondary" style="font-size:.65rem;">Private</span>
+          {% endif %}
+        </div>
+        <p class="text-muted small mb-3">{{ group.description|truncatechars:80 }}</p>
+        <div class="d-flex align-items-center justify-content-between">
+          <small class="text-muted"><i class="bi bi-people me-1"></i>{{ group.member_count }} member{{ group.member_count|pluralize }}</small>
+          {% if group.creator == request.user %}
+            <span class="badge" style="background:var(--bg-elevated);font-size:.65rem;">Creator</span>
+          {% endif %}
+        </div>
+      </a>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-center py-4 mb-5 text-muted">
+    <i class="bi bi-people display-4 d-block mb-2"></i>
+    <p>You haven't joined any groups yet.</p>
+  </div>
+  {% endif %}
+
+  <!-- Discover Public Groups -->
+  {% if public_groups %}
+  <h6 class="text-muted fw-semibold mb-3 text-uppercase" style="font-size:.7rem;letter-spacing:.08em;">Discover Public Groups</h6>
+  <div class="row g-3">
+    {% for group in public_groups %}
+    <div class="col-sm-6 col-lg-4">
+      <div class="cornote-card p-4 h-100">
+        <h6 class="fw-semibold mb-1">{{ group.name }}</h6>
+        <p class="text-muted small mb-3">{{ group.description|truncatechars:80 }}</p>
+        <div class="d-flex align-items-center justify-content-between">
+          <small class="text-muted"><i class="bi bi-people me-1"></i>{{ group.member_count }}</small>
+          <form method="post" action="{% url 'notebooks:join_group' %}">
+            {% csrf_token %}
+            <input type="hidden" name="invite_code" value="{{ group.invite_code }}">
+            <button class="btn btn-outline-accent btn-sm">Join</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</div>
+
+<!-- Create Group Modal -->
+<div class="modal fade" id="createModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background:var(--bg-surface);border:1px solid var(--bg-border)">
+      <div class="modal-header" style="border-bottom:1px solid var(--bg-border)">
+        <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Create Study Group</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{% url 'notebooks:create_group' %}">
+        {% csrf_token %}
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Group Name</label>
+            <input type="text" name="name" class="form-control" placeholder="e.g. Biology Study Crew" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Description</label>
+            <textarea name="description" class="form-control" rows="2" placeholder="What will you study together?"></textarea>
+          </div>
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="is_public" id="is_public" value="true">
+            <label class="form-check-label" for="is_public">Make this group public (discoverable)</label>
+          </div>
+        </div>
+        <div class="modal-footer" style="border-top:1px solid var(--bg-border)">
+          <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-accent">Create Group</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Join Group Modal -->
+<div class="modal fade" id="joinModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background:var(--bg-surface);border:1px solid var(--bg-border)">
+      <div class="modal-header" style="border-bottom:1px solid var(--bg-border)">
+        <h5 class="modal-title"><i class="bi bi-key me-2"></i>Join with Invite Code</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{% url 'notebooks:join_group' %}">
+        {% csrf_token %}
+        <div class="modal-body">
+          <label class="form-label fw-semibold">Invite Code</label>
+          <input type="text" name="invite_code" class="form-control font-mono" placeholder="Paste invite code here" required>
+        </div>
+        <div class="modal-footer" style="border-top:1px solid var(--bg-border)">
+          <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-accent">Join</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,92 @@
+<!-- ── Sidebar nav ── -->
+<div class="q-sidebar">
+  <div class="q-sidebar-header">Cues</div>
+  {% for question in questions %}
+  <button class="q-nav-btn{% if forloop.first %} active{% endif %}"
+          id="qnav-{{ question.pk }}"
+          onclick="selectQuestion({{ question.pk }})"
+          title="{{ question.question_text|truncatechars:80 }}">
+    <span class="q-nav-num">{{ question.order_index }}</span>
+    {% if question.answer %}
+      {% if question.answer.grade == 'correct' %}<span class="q-dot q-dot-correct"></span>
+      {% elif question.answer.grade == 'partial' %}<span class="q-dot q-dot-partial"></span>
+      {% elif question.answer.grade == 'incorrect' %}<span class="q-dot q-dot-incorrect"></span>
+      {% endif %}
+    {% endif %}
+    {% if question.needs_review %}<span class="q-flag-dot"></span>{% endif %}
+  </button>
+  {% empty %}
+  <div class="text-muted text-center py-2" style="font-size:.6rem;">-</div>
+  {% endfor %}
+</div>
+
+<!-- ── Detail pane ── -->
+<div class="q-detail">
+  <div class="q-detail-header">
+    <i class="bi bi-question-circle me-1"></i>
+    <span id="q-detail-label">Question</span>
+    <span class="ms-auto text-muted" style="font-size:.7rem;">{{ questions|length }} total</span>
+  </div>
+
+  {% for question in questions %}
+  <div class="question-block{% if question.needs_review %} question-flagged{% endif %}{% if not forloop.first %} d-none{% endif %}"
+       id="question-{{ question.pk }}"
+       data-pk="{{ question.pk }}"
+       data-index="{{ forloop.counter0 }}">
+
+    <div class="d-flex align-items-center justify-content-between mb-2">
+      <span class="question-number">Q{{ question.order_index }}</span>
+      <button class="btn btn-ghost btn-sm py-0 px-1 flag-btn {% if question.needs_review %}text-warning{% else %}text-muted{% endif %}"
+              title="{% if question.needs_review %}Flagged - click to unflag{% else %}Flag for review{% endif %}"
+              onclick="toggleFlag({{ question.pk }}, this)">
+        <i class="bi bi-{% if question.needs_review %}flag-fill{% else %}flag{% endif %}" style="font-size:.75rem;"></i>
+      </button>
+    </div>
+
+    <p class="question-text">{{ question.question_text }}</p>
+
+    <textarea
+      class="answer-input w-100"
+      name="user_answer"
+      placeholder="Your answer…"
+      rows="4"
+      hx-post="{% url 'notebooks:save_answer' question.pk %}"
+      hx-trigger="keyup changed delay:1200ms"
+      hx-target="#save-ind-{{ question.pk }}"
+      hx-swap="innerHTML"
+    >{% if question.answer %}{{ question.answer.user_answer }}{% endif %}</textarea>
+
+    <div class="d-flex align-items-center justify-content-between mt-2">
+      <span id="save-ind-{{ question.pk }}" class="save-indicator"></span>
+      {% if question.answer and question.answer.grade != 'ungraded' %}
+      <span class="badge bg-{{ question.answer.badge_color }} grade-badge">
+        {% if question.answer.grade == 'correct' %}<i class="bi bi-check-circle me-1"></i>Correct
+        {% elif question.answer.grade == 'partial' %}<i class="bi bi-dash-circle me-1"></i>Partial
+        {% else %}<i class="bi bi-x-circle me-1"></i>Incorrect{% endif %}
+      </span>
+      {% endif %}
+    </div>
+
+    {% if question.answer and question.answer.feedback and question.answer.grade != 'ungraded' %}
+    <div class="feedback-bubble mt-2">
+      <i class="bi bi-chat-left-text me-1"></i>{{ question.answer.feedback }}
+    </div>
+    {% endif %}
+
+    <!-- Prev / Next -->
+    <div class="d-flex justify-content-between mt-3 pt-2" style="border-top:1px solid var(--bg-border);">
+      <button class="btn btn-ghost btn-sm" onclick="navigateQ(-1)" {% if forloop.first %}disabled{% endif %}>
+        <i class="bi bi-chevron-left me-1"></i>Prev
+      </button>
+      <button class="btn btn-ghost btn-sm" onclick="navigateQ(1)" {% if forloop.last %}disabled{% endif %}>
+        Next<i class="bi bi-chevron-right ms-1"></i>
+      </button>
+    </div>
+  </div>
+  {% empty %}
+  <div class="text-center text-muted py-5 px-3">
+    <i class="bi bi-hourglass-split d-block mb-2" style="font-size:2rem;"></i>
+    <p class="small">Questions are being generated…</p>
+  </div>
+  {% endfor %}
+</div>

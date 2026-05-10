@@ -1,0 +1,148 @@
+{% extends 'base.html' %}
+{% block title %}Spaced Review | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:700px;margin:0 auto;">
+
+  <!-- Header -->
+  <div class="d-flex align-items-center justify-content-between mb-4">
+    <div>
+      <h1 class="h4 fw-bold mb-0"><i class="bi bi-arrow-repeat me-2 text-accent"></i>Spaced Review</h1>
+      <p class="text-muted small mb-0">{{ total_due }} question{{ total_due|pluralize }} due for review</p>
+    </div>
+    <a href="{% url 'notebooks:dashboard' %}" class="btn btn-ghost btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>Back
+    </a>
+  </div>
+
+  {% if questions %}
+  <!-- Progress bar -->
+  <div class="mb-4">
+    <div class="d-flex justify-content-between text-muted small mb-1">
+      <span id="progress-text">Question 1 of {{ questions|length }}</span>
+      <span id="score-text">0 correct</span>
+    </div>
+    <div class="progress" style="height:6px;background:var(--bg-elevated)">
+      <div class="progress-bar bg-accent" id="progress-bar" style="width:0%;transition:width .3s"></div>
+    </div>
+  </div>
+
+  <!-- Flashcard -->
+  <div id="flashcard-container">
+    <div class="cornote-card p-5 text-center mb-4" id="flashcard" style="min-height:200px;cursor:pointer;" onclick="flipCard()">
+      <div id="card-front">
+        <p class="text-muted small mb-3" id="card-notebook">-</p>
+        <p class="h5 fw-semibold" id="card-question">-</p>
+        <p class="text-muted small mt-4"><i class="bi bi-hand-index me-1"></i>Click to reveal answer</p>
+      </div>
+      <div id="card-back" class="d-none">
+        <p class="text-muted small mb-3">Expected answer:</p>
+        <p class="h6 fw-semibold text-success" id="card-answer">-</p>
+      </div>
+    </div>
+
+    <!-- Rating buttons (hidden until card flipped) -->
+    <div id="rating-buttons" class="d-none">
+      <p class="text-center text-muted small mb-3">How well did you remember?</p>
+      <div class="d-flex gap-2 justify-content-center flex-wrap">
+        <button class="btn btn-sm btn-danger" onclick="rate(1)">
+          <i class="bi bi-x-circle me-1"></i>Blackout
+        </button>
+        <button class="btn btn-sm btn-outline-danger" onclick="rate(2)">
+          <i class="bi bi-emoji-frown me-1"></i>Hard
+        </button>
+        <button class="btn btn-sm btn-outline-warning" onclick="rate(3)">
+          <i class="bi bi-emoji-neutral me-1"></i>OK
+        </button>
+        <button class="btn btn-sm btn-outline-success" onclick="rate(4)">
+          <i class="bi bi-emoji-smile me-1"></i>Good
+        </button>
+        <button class="btn btn-sm btn-success" onclick="rate(5)">
+          <i class="bi bi-star-fill me-1"></i>Perfect
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done state -->
+  <div id="review-done" class="d-none text-center py-5">
+    <i class="bi bi-trophy display-2 text-accent mb-3 d-block"></i>
+    <h3 class="fw-bold mb-1">Session Complete!</h3>
+    <p class="text-muted mb-4" id="final-score">-</p>
+    <a href="{% url 'notebooks:dashboard' %}" class="btn btn-accent me-2">Back to Dashboard</a>
+    <button class="btn btn-ghost" onclick="location.reload()">Review Again</button>
+  </div>
+
+  {% else %}
+  <div class="text-center py-5">
+    <i class="bi bi-check-circle display-2 text-success mb-3 d-block"></i>
+    <h3 class="fw-bold mb-1">All caught up!</h3>
+    <p class="text-muted mb-4">No questions due for review right now. Keep studying to add more.</p>
+    <a href="{% url 'notebooks:dashboard' %}" class="btn btn-accent">Go to Dashboard</a>
+  </div>
+  {% endif %}
+
+</div>
+
+<script>
+const questions = {{ questions_json|safe }};
+const CSRF = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('csrftoken='))?.split('=')[1] || '';
+
+let current = 0;
+let correctCount = 0;
+let flipped = false;
+
+function showCard(idx) {
+  const q = questions[idx];
+  document.getElementById('card-notebook').textContent = q.notebook;
+  document.getElementById('card-question').textContent = q.question_text;
+  document.getElementById('card-answer').textContent = q.expected_answer || '(no expected answer)';
+  document.getElementById('card-front').classList.remove('d-none');
+  document.getElementById('card-back').classList.add('d-none');
+  document.getElementById('rating-buttons').classList.add('d-none');
+  flipped = false;
+
+  // Update progress
+  const pct = Math.round((idx / questions.length) * 100);
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-text').textContent = `Question ${idx + 1} of ${questions.length}`;
+  document.getElementById('score-text').textContent = `${correctCount} correct`;
+}
+
+function flipCard() {
+  if (flipped) return;
+  flipped = true;
+  document.getElementById('card-front').classList.add('d-none');
+  document.getElementById('card-back').classList.remove('d-none');
+  document.getElementById('rating-buttons').classList.remove('d-none');
+}
+
+function rate(quality) {
+  const q = questions[current];
+  if (quality >= 4) correctCount++;
+
+  fetch(`/notebooks/api/spaced-repetition/${q.id}/review/`, {
+    method: 'POST',
+    headers: {'X-CSRFToken': CSRF, 'Content-Type': 'application/x-www-form-urlencoded'},
+    body: `quality=${quality}`,
+  }).catch(() => {});
+
+  current++;
+  if (current >= questions.length) {
+    finishSession();
+  } else {
+    showCard(current);
+  }
+}
+
+function finishSession() {
+  document.getElementById('flashcard-container').classList.add('d-none');
+  document.getElementById('progress-bar').style.width = '100%';
+  document.getElementById('review-done').classList.remove('d-none');
+  document.getElementById('final-score').textContent =
+    `${correctCount} of ${questions.length} remembered correctly`;
+}
+
+if (questions.length > 0) showCard(0);
+</script>
+{% endblock %}

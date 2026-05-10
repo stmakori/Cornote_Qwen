@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}Processing | {{ notebook.title }} | Cornote{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-center min-vh-100">
+  <div class="text-center" style="max-width:480px;">
+    <div id="processing-status"
+         hx-get="{% url 'notebooks:status' notebook.pk %}"
+         hx-trigger="every 2s"
+         hx-swap="outerHTML">
+      {% include 'notebooks/partials/processing_status.html' %}
+    </div>
+  </div>
+</div>
+{% endblock %}

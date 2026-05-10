@@ -1,0 +1,222 @@
+{% extends 'base.html' %}
+{% block title %}Exam | {{ notebook.title }} | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:860px;margin:0 auto;">
+
+  <!-- Pre-exam setup (shown before start) -->
+  <div id="exam-setup">
+    <div class="text-center py-5">
+      <i class="bi bi-journal-check display-2 text-accent mb-3 d-block"></i>
+      <h1 class="h3 fw-bold mb-1">{{ notebook.title }}</h1>
+      <p class="text-muted mb-4">{{ questions|length }} question{{ questions|length|pluralize }}</p>
+
+      <div class="cornote-card p-4 mb-4" style="max-width:360px;margin:0 auto;">
+        <label class="form-label fw-semibold">Time Limit (minutes)</label>
+        <input type="number" id="time-limit-input" class="form-control text-center" value="{{ default_time_limit }}" min="5" max="180">
+        <small class="text-muted d-block mt-1">Set 0 for unlimited time</small>
+      </div>
+
+      <button class="btn btn-accent btn-lg px-5" onclick="startExam()">
+        <i class="bi bi-play-fill me-2"></i>Start Exam
+      </button>
+      <div class="mt-3">
+        <a href="{% url 'notebooks:detail' notebook.pk %}" class="text-muted small">Back to notebook</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Exam (hidden until started) -->
+  <div id="exam-active" class="d-none exam-container">
+    <!-- Sticky header with timer -->
+    <div class="exam-header sticky-top">
+      <div class="exam-header-main">
+        <div class="exam-header-title">
+          <h2 class="mb-0">{{ notebook.title }}</h2>
+        </div>
+        <div class="exam-header-stats">
+          <div class="stat-item">
+            <small>Progress</small>
+            <span id="progress-label" class="fw-bold">0 / {{ questions|length }}</span>
+          </div>
+          <div class="stat-item timer-stat">
+            <small><i class="bi bi-clock me-1"></i>Time</small>
+            <span id="exam-timer" class="fw-bold timer-display">--:--</span>
+          </div>
+        </div>
+      </div>
+      <div class="exam-header-actions">
+        <button class="btn btn-sm btn-accent" onclick="confirmSubmit()">
+          <i class="bi bi-check2-all me-2"></i><span class="d-none d-sm-inline">Submit Exam</span><span class="d-sm-none">Submit</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Questions Container -->
+    <div id="questions-container" class="questions-list">
+      {% for q in questions %}
+      <div class="exam-question-card" id="qblock-{{ q.id }}" data-qid="{{ q.id }}">
+        <div class="question-header">
+          <div class="question-number-badge">Q{{ q.order_index }}</div>
+          <div class="question-meta">
+            <span class="difficulty-badge difficulty-{{ q.difficulty }}">
+              {% if q.difficulty == 1 %}Easy{% elif q.difficulty == 3 %}Hard{% else %}Medium{% endif %}
+            </span>
+          </div>
+        </div>
+        <div class="question-content">
+          <p class="question-text">{{ q.question_text }}</p>
+          <textarea
+            class="form-control exam-answer"
+            id="ans-{{ q.id }}"
+            rows="4"
+            placeholder="Type your answer here…"
+            oninput="markAnswered({{ q.id }})"
+          ></textarea>
+          <div class="question-footer">
+            <span class="answered-indicator d-none" id="badge-{{ q.id }}">
+              <i class="bi bi-check-circle-fill me-1"></i><span class="d-none d-sm-inline">Answered</span>
+            </span>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="text-center py-4">
+      <button class="btn btn-accent btn-lg px-5" onclick="confirmSubmit()">
+        <i class="bi bi-check2-all me-2"></i>Submit Exam
+      </button>
+    </div>
+  </div>
+
+  <!-- Submitting spinner -->
+  <div id="exam-submitting" class="d-none text-center py-5">
+    <div class="spinner-border text-accent mb-3" style="width:3rem;height:3rem;"></div>
+    <p class="text-muted">Grading your answers…</p>
+  </div>
+
+</div>
+
+<script>
+const NOTEBOOK_ID = {{ notebook.pk }};
+const TOTAL_QUESTIONS = {{ questions|length }};
+const CSRF = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('csrftoken='))?.split('=')[1] || '';
+
+let examId = null;
+let timerInterval = null;
+let secondsLeft = 0;
+let examStarted = false;
+
+function startExam() {
+  const limit = parseInt(document.getElementById('time-limit-input').value) || 0;
+
+  fetch(`/notebooks/api/exams/${NOTEBOOK_ID}/start/`, {
+    method: 'POST',
+    headers: {'X-CSRFToken': CSRF, 'Content-Type': 'application/x-www-form-urlencoded'},
+    body: `time_limit_minutes=${limit}`,
+  })
+  .then(r => r.json())
+  .then(data => {
+    examId = data.exam_id;
+    secondsLeft = limit > 0 ? limit * 60 : 0;
+    document.getElementById('exam-setup').classList.add('d-none');
+    document.getElementById('exam-active').classList.remove('d-none');
+    examStarted = true;
+    if (secondsLeft > 0) {
+      timerInterval = setInterval(tickTimer, 1000);
+      updateTimerDisplay();
+    } else {
+      document.getElementById('exam-timer').textContent = '∞';
+    }
+  })
+  .catch(err => alert('Could not start exam: ' + err));
+}
+
+function tickTimer() {
+  secondsLeft--;
+  updateTimerDisplay();
+  if (secondsLeft <= 0) {
+    clearInterval(timerInterval);
+    submitExam();
+  }
+}
+
+function updateTimerDisplay() {
+  const m = Math.floor(secondsLeft / 60).toString().padStart(2, '0');
+  const s = (secondsLeft % 60).toString().padStart(2, '0');
+  const el = document.getElementById('exam-timer');
+  el.textContent = `${m}:${s}`;
+  el.style.color = secondsLeft < 300 ? '#ef4444' : 'var(--text-primary)';
+}
+
+function markAnswered(qid) {
+  const val = document.getElementById(`ans-${qid}`).value.trim();
+  const badge = document.getElementById(`badge-${qid}`);
+  badge.classList.toggle('d-none', !val);
+  updateProgress();
+}
+
+function updateProgress() {
+  const answered = document.querySelectorAll('.answered-badge:not(.d-none)').length;
+  document.getElementById('progress-label').textContent = `${answered} / ${TOTAL_QUESTIONS}`;
+}
+
+function confirmSubmit() {
+  const answered = document.querySelectorAll('.answered-badge:not(.d-none)').length;
+  const unanswered = TOTAL_QUESTIONS - answered;
+  if (unanswered > 0) {
+    if (!confirm(`You have ${unanswered} unanswered question(s). Submit anyway?`)) return;
+  }
+  submitExam();
+}
+
+async function submitExam() {
+  if (!examId) return;
+  clearInterval(timerInterval);
+
+  // Collect answers
+  const answers = [];
+  document.querySelectorAll('.exam-question').forEach(block => {
+    const qid = block.dataset.qid;
+    const val = document.getElementById(`ans-${qid}`).value.trim();
+    if (val) answers.push({question_id: qid, answer: val});
+  });
+
+  document.getElementById('exam-active').classList.add('d-none');
+  document.getElementById('exam-submitting').classList.remove('d-none');
+
+  // Save answers via existing save_answer endpoint
+  for (const {question_id, answer} of answers) {
+    try {
+      await fetch(`/notebooks/answer/${question_id}/save/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF, 'Content-Type': 'application/x-www-form-urlencoded'},
+        body: `user_answer=${encodeURIComponent(answer)}`,
+      });
+    } catch(e) {}
+  }
+
+  // Finalize exam
+  fetch(`/notebooks/api/exams/${examId}/end/`, {
+    method: 'POST',
+    headers: {'X-CSRFToken': CSRF},
+  })
+  .then(r => r.json())
+  .then(() => {
+    window.location.href = `/notebooks/exams/${examId}/result/`;
+  })
+  .catch(() => {
+    window.location.href = `/notebooks/exams/${examId}/result/`;
+  });
+}
+
+// Warn on page leave during active exam
+window.addEventListener('beforeunload', (e) => {
+  if (examStarted) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+</script>
+{% endblock %}
