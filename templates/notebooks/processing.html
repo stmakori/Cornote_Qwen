@@ -2,12 +2,13 @@
 {% block title %}Processing | {{ notebook.title }} | Cornote{% endblock %}
 
 {% block content %}
-<div class="d-flex align-items-center justify-content-center min-vh-100">
-  <div class="text-center" style="max-width:480px;">
-    <div id="processing-status"
+<div class="d-flex align-items-center justify-content-center min-vh-100 px-3">
+  <div class="processing-htmx-root text-center w-100" style="max-width:480px;">
+    {# innerHTML swap keeps this element (and hx polling) alive; partial must not duplicate this id #}
+    <div id="processing-htmx"
          hx-get="{% url 'notebooks:status' notebook.pk %}"
-         hx-trigger="every 2s"
-         hx-swap="outerHTML">
+         hx-trigger="load delay:400ms, every 2s"
+         hx-swap="innerHTML">
       {% include 'notebooks/partials/processing_status.html' %}
     </div>
   </div>

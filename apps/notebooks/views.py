@@ -1,16 +1,20 @@
 import threading
 import logging
 from django.shortcuts import render, get_object_or_404, redirect
+from django.urls import reverse
+from django_htmx.http import HttpResponseClientRedirect
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST, require_GET
 from django.http import JsonResponse, HttpResponse
 from django.contrib import messages
 from django.utils import timezone
 from django.conf import settings
+from django.db.models import Q
 
 from .models import Notebook, Question, Answer, Summary, StudySession
 from .forms import PDFUploadForm, NotesEditForm, SummaryForm
-from .services.pdf_processor import extract_text_from_pdf, truncate_for_ai
+from .services.pdf_processor import truncate_for_ai
+from .services.document_processor import extract_document_text, tesseract_ocr_available
 from .services import ai_service
 from .services.features_service import (
     AnalyticsService, SpacedRepetitionService, AchievementService,
@@ -21,46 +25,54 @@ logger = logging.getLogger(__name__)
 
 
 def _process_notebook(notebook_id: int):
-    """Background thread: extract PDF text, generate questions and key points."""
-    import django
+    """Background thread: extract document text, AI key points & questions (resumable by processing_stage)."""
     from django.db import connection
 
-    # Each thread needs its own DB connection
     try:
         notebook = Notebook.objects.get(pk=notebook_id)
         notebook.status = Notebook.STATUS_PROCESSING
         notebook.save(update_fields=['status'])
 
-        # Step 1: Extract text
-        pdf_path = notebook.pdf_file.path
-        pdf_text = extract_text_from_pdf(pdf_path)
-        notebook.pdf_text = pdf_text
-        notebook.notes_content = pdf_text
-        notebook.save(update_fields=['pdf_text', 'notes_content'])
+        file_path = notebook.pdf_file.path
+        original_name = notebook.pdf_file.name
 
-        # Step 2: Extract key points
-        truncated = truncate_for_ai(pdf_text)
-        key_points = ai_service.extract_key_points(truncated)
+        if notebook.processing_stage < Notebook.STAGE_TEXT:
+            body = extract_document_text(file_path, original_name)
+            notebook.pdf_text = body
+            notebook.notes_content = body
+            notebook.processing_stage = Notebook.STAGE_TEXT
+            notebook.save(update_fields=['pdf_text', 'notes_content', 'processing_stage'])
 
-        # Step 3: Generate questions
-        questions_data = ai_service.generate_questions(truncated)
+        truncated = truncate_for_ai(notebook.pdf_text)
 
-        # Step 4: Save questions and answers
-        for idx, q_data in enumerate(questions_data):
-            question = Question.objects.create(
+        if notebook.processing_stage < Notebook.STAGE_SUMMARY_KEYS:
+            key_points = ai_service.extract_key_points(truncated)
+            Summary.objects.update_or_create(
                 notebook=notebook,
-                question_text=q_data.get('question_text', ''),
-                expected_answer=q_data.get('expected_answer', ''),
-                expected_keywords=q_data.get('expected_keywords', []),
-                order_index=idx + 1,
+                defaults={'key_points': key_points},
             )
-            Answer.objects.create(question=question)
+            notebook.processing_stage = Notebook.STAGE_SUMMARY_KEYS
+            notebook.save(update_fields=['processing_stage'])
 
-        # Step 5: Create summary record with key points
-        Summary.objects.create(notebook=notebook, key_points=key_points)
+        if notebook.processing_stage < Notebook.STAGE_QUESTIONS:
+            questions_data = ai_service.generate_questions(truncated)
+            Question.objects.filter(notebook=notebook).delete()
+            for idx, q_data in enumerate(questions_data):
+                question = Question.objects.create(
+                    notebook=notebook,
+                    question_text=q_data.get('question_text', ''),
+                    expected_answer=q_data.get('expected_answer', ''),
+                    expected_keywords=q_data.get('expected_keywords', []),
+                    order_index=idx + 1,
+                )
+                Answer.objects.create(question=question)
+            notebook.processing_stage = Notebook.STAGE_QUESTIONS
+            notebook.save(update_fields=['processing_stage'])
 
-        notebook.status = Notebook.STATUS_READY
-        notebook.save(update_fields=['status'])
+        if notebook.processing_stage < Notebook.STAGE_READY:
+            notebook.status = Notebook.STATUS_READY
+            notebook.processing_stage = Notebook.STAGE_READY
+            notebook.save(update_fields=['status', 'processing_stage'])
 
     except Exception as exc:
         logger.exception('Error processing notebook %s', notebook_id)
@@ -80,7 +92,14 @@ def _process_notebook(notebook_id: int):
 @login_required
 def dashboard(request):
     notebooks = Notebook.objects.filter(user=request.user).prefetch_related('questions')
-    return render(request, 'notebooks/dashboard.html', {'notebooks': notebooks})
+    q = request.GET.get('q', '').strip()
+    if q:
+        notebooks = notebooks.filter(Q(title__icontains=q) | Q(description__icontains=q))
+    return render(
+        request,
+        'notebooks/dashboard.html',
+        {'notebooks': notebooks, 'search_q': q},
+    )
 
 
 # ────────────────────────── Upload ──────────────────────────
@@ -122,7 +141,10 @@ def upload_pdf(request):
             messages.error(request, 'Please fix the errors below.')
     else:
         form = PDFUploadForm()
-    return render(request, 'notebooks/upload.html', {'form': form})
+    return render(request, 'notebooks/upload.html', {
+        'form': form,
+        'ocr_available': tesseract_ocr_available(),
+    })
 
 
 # ────────────────────────── Processing / Status ──────────────────────────
@@ -137,9 +159,16 @@ def notebook_processing(request, pk):
 
 @login_required
 def notebook_status(request, pk):
-    """HTMX polling endpoint - returns a partial that either redirects or shows progress."""
+    """HTMX polling endpoint — when the notebook is ready, respond with HX-Redirect to the detail page."""
     notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
-    return render(request, 'notebooks/partials/processing_status.html', {'notebook': notebook})
+    notebook.refresh_from_db(fields=['status', 'error_message', 'processing_stage'])
+    if notebook.is_ready:
+        if request.htmx:
+            return HttpResponseClientRedirect(reverse('notebooks:detail', args=[pk]))
+        return redirect('notebooks:detail', pk=pk)
+    resp = render(request, 'notebooks/partials/processing_status.html', {'notebook': notebook})
+    resp['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return resp
 
 
 # ────────────────────────── Notebook Detail ──────────────────────────

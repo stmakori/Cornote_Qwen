@@ -1,10 +1,5 @@
-{% if notebook.status == 'ready' %}
-<div id="processing-status" hx-swap-oob="true">
-  <script>window.location.href = "{% url 'notebooks:detail' notebook.pk %}";</script>
-</div>
-
-{% elif notebook.status == 'error' %}
-<div id="processing-status">
+{% if notebook.status == 'error' %}
+<div class="processing-status-body">
   <i class="bi bi-exclamation-circle-fill text-danger display-3 mb-3"></i>
   <h2 class="h5 fw-semibold text-danger">Processing Failed</h2>
   <p class="text-muted mt-2 mb-4">{{ notebook.error_message }}</p>
@@ -16,35 +11,44 @@
       </button>
     </form>
     <a href="{% url 'notebooks:upload' %}" class="btn btn-ghost">
-      <i class="bi bi-cloud-upload me-2"></i>Upload Different PDF
+      <i class="bi bi-cloud-upload me-2"></i>Upload another file
     </a>
     <a href="{% url 'notebooks:dashboard' %}" class="btn btn-ghost">Dashboard</a>
   </div>
 </div>
 
 {% else %}
-<div id="processing-status">
+<div class="processing-status-body">
   <div class="processing-spinner mb-4">
     <div class="spinner-ring"></div>
   </div>
   <h2 class="h5 fw-semibold mb-2">Building your notebook…</h2>
   <p class="text-muted mb-4">
     {% if notebook.status == 'uploading' %}
-      Saving your PDF…
+      Saving your file…
+    {% elif notebook.processing_stage < 1 %}
+      Preparing to extract text…
+    {% elif notebook.processing_stage < 2 %}
+      Extracting text from your document…
+    {% elif notebook.processing_stage < 3 %}
+      Pulling out key ideas with AI…
     {% else %}
-      Extracting text and generating study questions with AI. This takes 15–40 seconds.
+      Generating study questions…
     {% endif %}
   </p>
   <div class="processing-steps">
     <div class="step {% if notebook.status != 'uploading' %}done{% endif %}">
-      <i class="bi bi-check-circle-fill me-2"></i>PDF uploaded
+      <i class="bi bi-check-circle-fill me-2"></i>File uploaded
     </div>
-    <div class="step {% if notebook.status == 'ready' %}done{% endif %}">
-      <i class="bi bi-hourglass-split me-2 text-accent"></i>Extracting text &amp; generating questions…
+    <div class="step {% if notebook.processing_stage >= 2 %}done{% endif %}">
+      <i class="bi bi-journal-text me-2 text-accent"></i>Text &amp; key ideas (AI)
+    </div>
+    <div class="step {% if notebook.processing_stage >= 3 %}done{% endif %}">
+      <i class="bi bi-patch-question me-2 text-accent"></i>Study questions
     </div>
   </div>
   <p class="text-muted mt-4" style="font-size:.75rem;">
-    <i class="bi bi-lock me-1"></i>Your PDF is processed privately and never shared.
+    <i class="bi bi-lock me-1"></i>Your document is processed privately and never shared.
   </p>
 </div>
 {% endif %}

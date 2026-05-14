@@ -15,13 +15,22 @@ class Notebook(models.Model):
         (STATUS_ERROR, 'Error'),
     ]
 
+    STAGE_NEW = 0
+    STAGE_TEXT = 1
+    STAGE_SUMMARY_KEYS = 2
+    STAGE_QUESTIONS = 3
+    STAGE_READY = 4
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notebooks')
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)  # User description
     
-    pdf_file = models.FileField(upload_to='pdfs/%Y/%m/')
+    pdf_file = models.FileField(upload_to='documents/%Y/%m/')
     pdf_text = models.TextField(blank=True)
     notes_content = models.TextField(blank=True, help_text='User-edited version of the extracted notes')
+    
+    # Resumable pipeline: 0=new, 1=text extracted, 2=key points saved, 3=questions saved, 4=ready
+    processing_stage = models.PositiveSmallIntegerField(default=0, db_index=True)
     
     # Rich text editor content
     notes_html = models.TextField(blank=True)  # HTML version of notes
@@ -70,6 +79,18 @@ class Notebook(models.Model):
     @property
     def is_ready(self):
         return self.status == self.STATUS_READY
+
+    @property
+    def source_extension(self) -> str:
+        name = (self.pdf_file.name or '').lower()
+        if '.' in name:
+            return '.' + name.rsplit('.', 1)[-1]
+        return ''
+
+    @property
+    def is_pdf_embeddable(self) -> bool:
+        """Only PDFs can be shown in the in-app iframe viewer."""
+        return self.source_extension == '.pdf'
 
     @property
     def question_count(self):

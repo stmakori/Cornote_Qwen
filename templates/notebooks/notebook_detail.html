@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load notebooks_extras %}
 {% block title %}{{ notebook.title }} | Cornote{% endblock %}
 
 {% block extra_head %}
@@ -14,21 +15,29 @@
 {% endblock %}
 
 {% block content %}
+<div class="notebook-workspace">
 <!-- ── Notebook Toolbar ── -->
-<div class="notebook-toolbar d-flex align-items-center justify-content-between px-3 px-md-4 py-2 flex-wrap gap-2">
+<div class="notebook-toolbar d-flex align-items-center justify-content-between px-3 px-md-4 py-2 flex-wrap gap-3">
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <a href="{% url 'notebooks:dashboard' %}" class="btn btn-ghost btn-sm">
       <i class="bi bi-arrow-left"></i>
     </a>
-    <span class="notebook-title fw-semibold text-truncate" style="max-width:260px;" title="{{ notebook.title }}">
+    <span class="notebook-title fw-semibold text-truncate" style="max-width:min(280px, 40vw);" title="{{ notebook.title }}">
       {{ notebook.title }}
     </span>
     <span class="badge bg-secondary" style="font-size:.7rem;">
       {{ notebook.question_count }} Q
     </span>
+    <span class="text-muted d-none d-md-inline" style="font-size:.68rem;" title="Notebook last updated">
+      · Updated {{ notebook.updated_at|date:"M j, H:i" }}
+    </span>
   </div>
 
-  <div class="d-flex align-items-center gap-2">
+  <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+    <button type="button" class="btn btn-sm btn-ghost d-none d-md-inline-block" title="Keyboard shortcuts (?)"
+            onclick="window.cornoteFeatures && window.cornoteFeatures.showShortcutsModal && window.cornoteFeatures.showShortcutsModal()">
+      <i class="bi bi-keyboard"></i>
+    </button>
     <!-- Grade All -->
     <button class="btn btn-sm btn-outline-accent"
             hx-post="{% url 'notebooks:grade_answers' notebook.pk %}"
@@ -51,9 +60,15 @@
           </a>
         </li>
         <li>
+          {% if notebook.is_pdf_embeddable %}
           <button class="dropdown-item" data-bs-toggle="modal" data-bs-target="#pdfViewerModal">
-            <i class="bi bi-file-earmark-text me-2"></i>View Source PDF
+            <i class="bi bi-file-earmark-text me-2"></i>View source PDF
           </button>
+          {% else %}
+          <a class="dropdown-item" href="{{ notebook.pdf_file.url }}" download rel="noopener">
+            <i class="bi bi-download me-2"></i>Download source file
+          </a>
+          {% endif %}
         </li>
         <li><hr class="dropdown-divider"></li>
         <li>
@@ -115,7 +130,7 @@
 
     <!-- Formatted read view (default for plain-text notes) -->
     <div id="notes-render"
-         class="notes-render {% if notebook.notes_html %}d-none{% endif %}"></div>
+         class="notes-render {% if notebook.notes_html %}d-none{% endif %}">{{ notebook.notes_content|notes_flow }}</div>
 
     <!-- Plain-text textarea (edit mode only) -->
     <textarea
@@ -132,13 +147,18 @@
 
 </div>
 
-<!-- ── Summary Section with Vertical Sidebar Nav ── -->
-<div class="cornell-summary">
-  <div class="cornell-col-header">
-    <i class="bi bi-pencil-square me-2"></i>Summary & Review
-    <span class="ms-auto" id="summary-save-indicator"></span>
-  </div>
-
+<!-- ── Summary: collapsible so the Cornell grid gets more vertical space ── -->
+<details class="cornell-summary-details">
+  <summary class="cornell-summary-disclosure">
+    <i class="bi bi-pencil-square text-accent"></i>
+    <span>Summary &amp; review</span>
+    <span class="disclosure-hint text-muted fw-normal text-uppercase d-none d-md-inline" style="font-size:.62rem;letter-spacing:.04em;">AI summary · feedback</span>
+    <i class="bi bi-chevron-down disclosure-chevron" aria-hidden="true"></i>
+  </summary>
+  <div class="cornell-summary-panel">
+    <div class="cornell-summary-toolbar d-flex align-items-center justify-content-end px-3 py-1 border-bottom border-secondary">
+      <span id="summary-save-indicator"></span>
+    </div>
   <div class="summary-layout">
     <!-- Vertical section sidebar -->
     <nav class="summary-sidenav">
@@ -229,7 +249,10 @@
 
     </div>{# end .summary-tab-content #}
   </div>{# end .summary-layout #}
-</div>
+  </div>{# end .cornell-summary-panel #}
+</details>
+
+</div>{# end .notebook-workspace #}
 
 <!-- PDF Viewer Modal -->
 <div class="modal fade" id="pdfViewerModal" tabindex="-1">
@@ -241,13 +264,23 @@
         </h6>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body p-0 h-100">
+      <div class="modal-body p-0 h-100 d-flex flex-column">
+        {% if notebook.is_pdf_embeddable %}
         <iframe src="{{ notebook.pdf_file.url }}" width="100%" height="100%"
-                style="border:none;display:block;min-height:75vh;"
+                style="border:none;display:block;min-height:75vh;flex:1;"
                 title="Source PDF"></iframe>
+        {% else %}
+        <div class="p-4 text-center text-muted flex-fill d-flex flex-column align-items-center justify-content-center">
+          <i class="bi bi-file-earmark-text display-4 mb-3 text-accent"></i>
+          <p class="mb-3">In-app preview is available for <strong>PDF</strong> uploads only. Download your original file to open it in Word or another app.</p>
+          <a href="{{ notebook.pdf_file.url }}" class="btn btn-accent" download rel="noopener">
+            <i class="bi bi-download me-2"></i>Download source file
+          </a>
+        </div>
+        {% endif %}
         <div class="p-3 border-top" style="border-color:var(--bg-border) !important;">
           <a href="{{ notebook.pdf_file.url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">
-            <i class="bi bi-box-arrow-up-right me-1"></i>Open PDF in New Tab
+            <i class="bi bi-box-arrow-up-right me-1"></i>Open in new tab
           </a>
         </div>
       </div>
@@ -279,13 +312,44 @@
   let notesEditMode = false;  // false = formatted view, true = plain textarea
   const CSRF = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('csrftoken='))?.split('=')[1]||'';
 
-  // Render extracted text with original line breaks to mirror PDF flow.
+  // Structured plain-text notes: paragraphs, bullet lists, numbered lists (keep in sync
+  // with pdf_processor.plain_text_notes_to_html).
   function notesTextToHtml(text) {
     if (!text || !text.trim()) {
       return '<p class="notes-placeholder">Your notes will appear here after processing…</p>';
     }
-    const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    return `<pre class="notes-pre">${esc(text)}</pre>`;
+    const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const t = text.trim();
+    const blocks = t.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+    const parts = [];
+    const bulletRe = /^[-*•]\s+(.+)$/;
+    const numRe = /^\d+[\.)]\s+(.+)$/;
+
+    for (const block of blocks) {
+      const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (!lines.length) continue;
+
+      const bulletMatches = lines.map((l) => l.match(bulletRe));
+      if (lines.length >= 1 && bulletMatches.every((m) => m)) {
+        parts.push(
+          '<ul class="notes-ul notes-list">' +
+            bulletMatches.map((m) => '<li>' + esc(m[1]) + '</li>').join('') +
+            '</ul>'
+        );
+        continue;
+      }
+      const numMatches = lines.map((l) => l.match(numRe));
+      if (lines.length >= 1 && numMatches.every((m) => m)) {
+        parts.push(
+          '<ol class="notes-ol notes-list">' +
+            numMatches.map((m) => '<li>' + esc(m[1]) + '</li>').join('') +
+            '</ol>'
+        );
+        continue;
+      }
+      parts.push('<p class="notes-p">' + lines.map((l) => esc(l)).join('<br>\n') + '</p>');
+    }
+    return '<div class="notes-flow">' + parts.join('') + '</div>';
   }
 
   function renderNotesView() {

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Upload PDF | Cornote{% endblock %}
+{% block title %}Upload document | Cornote{% endblock %}
 
 {% block content %}
 <div class="container" style="max-width:580px;margin-top:4rem;">
@@ -9,11 +9,19 @@
 
   <div class="cornote-card p-4 p-md-5">
     <h1 class="h4 fw-bold mb-1">
-      <i class="bi bi-file-earmark-pdf text-accent me-2"></i>Upload a PDF
+      <i class="bi bi-cloud-upload text-accent me-2"></i>Upload a study document
     </h1>
     <p class="text-muted small mb-4">
-      Cornote will extract the text, generate Cornell-style questions, and build your study notebook automatically.
+      Cornote extracts text from PDFs, Word documents, or plain text files, then builds Cornell-style questions with AI.
     </p>
+
+    {% if ocr_available == False %}
+    <div class="alert alert-warning py-2 px-3 small mb-4" role="status">
+      <i class="bi bi-camera-reels me-1"></i>
+      <strong>Scanned PDFs:</strong> Tesseract OCR does not appear to be installed on this server.
+      Image-only PDFs may fail until Tesseract is available.
+    </div>
+    {% endif %}
 
     <form method="post" enctype="multipart/form-data" id="upload-form" novalidate>
       {% csrf_token %}
@@ -33,7 +41,7 @@
 
       <!-- File preview area -->
       <div id="file-preview" class="file-drop-area d-none mb-4 p-3 rounded">
-        <i class="bi bi-file-earmark-pdf-fill text-danger me-2"></i>
+        <i class="bi bi-file-earmark-text-fill text-accent me-2"></i>
         <span id="file-name" class="small"></span>
         <span id="file-size" class="text-muted small ms-2"></span>
       </div>
@@ -46,9 +54,9 @@
     <div class="mt-4 p-3 rounded" style="background:rgba(255,255,255,.04);font-size:.8rem;">
       <strong class="text-accent"><i class="bi bi-info-circle me-1"></i>What happens next?</strong>
       <ol class="mt-2 mb-0 ps-3 text-muted">
-        <li>We extract text from your PDF</li>
-        <li>AI generates 5–10 study questions</li>
-        <li>Your Cornell notebook is ready to use</li>
+        <li>We extract text from your file</li>
+        <li>AI finds key ideas and writes study questions</li>
+        <li>Your Cornell notebook opens when processing finishes</li>
       </ol>
     </div>
   </div>

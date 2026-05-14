@@ -70,6 +70,49 @@ def format_notes_for_display(text: str) -> str:
     return '\n\n'.join(paragraphs)
 
 
+_BULLET_LINE = re.compile(r'^[-*•]\s+(.+)$')
+_NUMBERED_LINE = re.compile(r'^\d+[\.)]\s+(.+)$')
+
+
+def plain_text_notes_to_html(text: str) -> str:
+    """
+    Convert plain extracted/edited notes into readable HTML: paragraphs, bullet lists,
+    and numbered lists. All text is escaped (safe for mark_safe).
+    """
+    from django.utils.html import escape
+    from django.utils.safestring import mark_safe
+
+    t = (text or '').strip()
+    if not t:
+        return mark_safe(
+            '<p class="notes-placeholder">Your notes will appear here after processing…</p>'
+        )
+
+    blocks = [b.strip() for b in re.split(r'\n{2,}', t) if b.strip()]
+    parts = []
+    for block in blocks:
+        lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+        if not lines:
+            continue
+
+        bullet_matches = [_BULLET_LINE.match(ln) for ln in lines]
+        if len(lines) >= 1 and all(bullet_matches):
+            lis = ''.join(f'<li>{escape(m.group(1))}</li>' for m in bullet_matches)
+            parts.append(f'<ul class="notes-ul notes-list">{lis}</ul>')
+            continue
+
+        num_matches = [_NUMBERED_LINE.match(ln) for ln in lines]
+        if len(lines) >= 1 and all(num_matches):
+            lis = ''.join(f'<li>{escape(m.group(1))}</li>' for m in num_matches)
+            parts.append(f'<ol class="notes-ol notes-list">{lis}</ol>')
+            continue
+
+        inner = '<br>\n'.join(escape(ln) for ln in lines)
+        parts.append(f'<p class="notes-p">{inner}</p>')
+
+    return mark_safe('<div class="notes-flow">' + ''.join(parts) + '</div>')
+
+
 def truncate_for_ai(text: str, max_chars: int = 12000) -> str:
     """Truncate text to fit within AI prompt limits while keeping whole sentences."""
     if len(text) <= max_chars:

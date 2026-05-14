@@ -1,26 +1,37 @@
 import json
 import logging
+import time
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
 # ── Provider helpers ───────────────────────────────────────────
 
+def _http_timeout():
+    from httpx import Timeout
+
+    t = float(getattr(settings, 'AI_REQUEST_TIMEOUT', 120))
+    return Timeout(t, connect=min(30.0, t))
+
+
 def _get_client():
     """Return an OpenAI-compatible client for the configured AI provider."""
     from openai import OpenAI
+
     provider = settings.AI_PROVIDER
+    timeout = _http_timeout()
     if provider == 'groq':
         if not settings.GROQ_API_KEY:
             raise ValueError('GROQ_API_KEY is not set. Add it to your .env file.')
         return OpenAI(
             api_key=settings.GROQ_API_KEY,
             base_url='https://api.groq.com/openai/v1',
+            timeout=timeout,
         )
     if provider == 'openai':
         if not settings.OPENAI_API_KEY:
             raise ValueError('OPENAI_API_KEY is not set. Add it to your .env file.')
-        return OpenAI(api_key=settings.OPENAI_API_KEY)
+        return OpenAI(api_key=settings.OPENAI_API_KEY, timeout=timeout)
     raise ValueError(
         f'Unknown AI_PROVIDER "{provider}" in settings. Must be "openai" or "groq".'
     )
@@ -29,13 +40,13 @@ def _get_client():
 def friendly_error(exc) -> str:
     """Convert an API exception into a short, actionable message for the user."""
     try:
-        from openai import AuthenticationError, RateLimitError, APIConnectionError, BadRequestError, APIStatusError
+        from openai import AuthenticationError, RateLimitError, APIConnectionError, BadRequestError, APIStatusError, APITimeoutError
         if isinstance(exc, AuthenticationError):
             provider = settings.AI_PROVIDER.upper()
             return f'Invalid API key - check your {provider}_API_KEY in .env.'
         if isinstance(exc, RateLimitError):
             return 'Rate limit reached - wait a moment and try again.'
-        if isinstance(exc, APIConnectionError):
+        if isinstance(exc, (APIConnectionError, APITimeoutError)):
             return 'Could not connect to the AI service - check your internet connection.'
         if isinstance(exc, BadRequestError):
             return f'Request rejected by the AI service: {exc.message[:120]}'
@@ -51,11 +62,25 @@ def friendly_error(exc) -> str:
 def _model():
     if settings.AI_PROVIDER == 'groq':
         return settings.GROQ_MODEL_ID
-    return 'gpt-4o-mini'
+    return getattr(settings, 'OPENAI_CHAT_MODEL', 'gpt-4o-mini')
 
 
-def _chat(messages, temperature=0.5, max_tokens=1000, json_mode=False):
-    """Single entry point for all chat completions."""
+def _is_transient_ai_error(exc) -> bool:
+    try:
+        from openai import RateLimitError, APIConnectionError, APITimeoutError, APIStatusError
+
+        if isinstance(exc, (RateLimitError, APIConnectionError, APITimeoutError)):
+            return True
+        if isinstance(exc, APIStatusError) and getattr(exc, 'status_code', 0) in (
+            429, 500, 502, 503, 504
+        ):
+            return True
+    except ImportError:
+        pass
+    return False
+
+
+def _chat_once(messages, temperature=0.5, max_tokens=1000, json_mode=False):
     client = _get_client()
     kwargs = dict(
         model=_model(),
@@ -67,6 +92,29 @@ def _chat(messages, temperature=0.5, max_tokens=1000, json_mode=False):
         kwargs['response_format'] = {'type': 'json_object'}
     response = client.chat.completions.create(**kwargs)
     return response.choices[0].message.content
+
+
+def _chat(messages, temperature=0.5, max_tokens=1000, json_mode=False):
+    """Chat completions with retries on transient provider errors."""
+    attempts = int(getattr(settings, 'AI_MAX_RETRIES', 3))
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            return _chat_once(messages, temperature, max_tokens, json_mode)
+        except Exception as exc:
+            last_exc = exc
+            if not _is_transient_ai_error(exc) or attempt >= attempts - 1:
+                raise
+            delay = 1.5 * (2**attempt)
+            logger.warning(
+                'AI chat failed (attempt %s/%s), retrying in %.1fs: %s',
+                attempt + 1,
+                attempts,
+                delay,
+                exc,
+            )
+            time.sleep(delay)
+    raise last_exc
 
 
 def _parse_json(content, fallback=None):
@@ -264,7 +312,8 @@ def generate_audio_summary(text: str) -> bytes:
         raise ValueError('Audio summaries require OPENAI_API_KEY even when using Groq for text.')
 
     from openai import OpenAI
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+    client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=_http_timeout())
     response = client.audio.speech.create(
         model='tts-1',
         voice='nova',

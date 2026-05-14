@@ -100,8 +100,19 @@
         if (summary) summary.focus();
       }
 
-      // Ctrl+? → Show shortcuts help
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === '?') {
+      // Ctrl+? or Ctrl+Shift+/ → Show shortcuts help (browser may use Ctrl+Shift+/)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === '?' || e.key === '/')) {
+        e.preventDefault();
+        showShortcutsModal();
+      }
+
+      // Plain ? on notebook page (not in form fields)
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const t = e.target;
+        if (t && t.isContentEditable) return;
+        const tag = t && t.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (!document.querySelector('.cornell-grid')) return;
         e.preventDefault();
         showShortcutsModal();
       }
@@ -168,6 +179,10 @@
                 <tr>
                   <td><kbd>Ctrl+3</kbd></td>
                   <td>Focus summary area</td>
+                </tr>
+                <tr>
+                  <td><kbd>Ctrl+Shift+/</kbd> or <kbd>?</kbd></td>
+                  <td>Show this help (when not typing in a field)</td>
                 </tr>
                 <tr>
                   <td><kbd>Ctrl+Shift+F</kbd></td>
@@ -264,7 +279,7 @@
     const grid = document.querySelector('.cornell-grid');
     if (grid && !sessionStorage.getItem('cornote_shortcuts_hint')) {
       setTimeout(() => {
-        showNotification('💡 Tip: Press Ctrl+? for keyboard shortcuts', 'info');
+        showNotification('Tip: Press ? for keyboard shortcuts', 'info');
         sessionStorage.setItem('cornote_shortcuts_hint', '1');
       }, 2000);
     }

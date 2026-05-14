@@ -1,6 +1,8 @@
 from django import forms
 from django.conf import settings
+
 from .models import Notebook
+from .services.document_processor import ALLOWED_EXTENSIONS, allowed_upload_suffix
 
 
 class PDFUploadForm(forms.ModelForm):
@@ -14,20 +16,34 @@ class PDFUploadForm(forms.ModelForm):
             }),
             'pdf_file': forms.FileInput(attrs={
                 'class': 'form-control',
-                'accept': '.pdf',
+                'accept': ','.join(sorted(ALLOWED_EXTENSIONS)),
             }),
+        }
+        labels = {
+            'pdf_file': 'Study document',
+        }
+        help_texts = {
+            'pdf_file': (
+                f'PDF, Word (.docx), or plain text (.txt, .md). '
+                f'Max {getattr(settings, "MAX_UPLOAD_MB", settings.MAX_PDF_SIZE_MB)} MB.'
+            ),
         }
 
     def clean_pdf_file(self):
         pdf = self.cleaned_data.get('pdf_file')
         if pdf:
-            max_bytes = settings.MAX_PDF_SIZE_MB * 1024 * 1024
+            max_mb = getattr(settings, 'MAX_UPLOAD_MB', settings.MAX_PDF_SIZE_MB)
+            max_bytes = max_mb * 1024 * 1024
             if pdf.size > max_bytes:
                 raise forms.ValidationError(
-                    f'File too large. Maximum size is {settings.MAX_PDF_SIZE_MB} MB.'
+                    f'File too large. Maximum size is {max_mb} MB.'
                 )
-            if not pdf.name.lower().endswith('.pdf'):
-                raise forms.ValidationError('Only PDF files are supported.')
+            ext = allowed_upload_suffix(pdf.name)
+            if ext is None:
+                allowed = ', '.join(sorted(ALLOWED_EXTENSIONS))
+                raise forms.ValidationError(
+                    f'Unsupported file type. Allowed extensions: {allowed}'
+                )
         return pdf
 
 
