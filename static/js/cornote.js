@@ -45,13 +45,77 @@
       console.warn('HTMX request failed:', evt.detail.xhr.status, evt.detail.requestConfig.path);
     });
 
-    // After HTMX settles (e.g. after grading), select the first question
-    document.body.addEventListener('htmx:afterSettle', function () {
-      const first = document.querySelector('.q-nav-btn');
-      if (first) {
-        const pk = first.id.replace('qnav-', '');
-        selectQuestion(parseInt(pk, 10));
-      }
+    // After HTMX settles, only auto-select the first question for grade actions
+    document.body.addEventListener('htmx:afterSettle', function (evt) {
+      try {
+        const path = evt && evt.detail && evt.detail.requestConfig && evt.detail.requestConfig.path;
+        if (path && path.includes('/grade')) {
+          const first = document.querySelector('.q-nav-btn');
+          if (first) {
+            const pk = first.id.replace('qnav-', '');
+            selectQuestion(parseInt(pk, 10));
+          }
+        }
+      } catch (e) { /* ignore */ }
+    });
+
+    // Grade All: show progress, disable button while grading, and update after swap
+    const gradeBtn = document.getElementById('grade-all-btn');
+    if (gradeBtn) {
+      gradeBtn.addEventListener('click', function () {
+        try {
+          const total = document.querySelectorAll('.q-nav-btn').length || document.querySelectorAll('#questions-column .question-block').length || 0;
+          const prog = document.getElementById('grade-progress');
+          const label = document.getElementById('grade-all-label');
+          gradeBtn.disabled = true;
+          if (label) label.textContent = 'Grading...';
+          if (prog) {
+            prog.classList.remove('d-none');
+            prog.textContent = `Grading 0/${total}`;
+          }
+        } catch (e) { /* ignore */ }
+      });
+
+      document.body.addEventListener('htmx:afterSwap', function (evt) {
+        try {
+          const target = evt && evt.detail && evt.detail.target;
+          if (!target) return;
+          // If the questions column was swapped, update progress and re-enable
+          const isQuestions = (target.id === 'questions-column') || (target.closest && target.closest('#questions-column'));
+          if (!isQuestions) return;
+          const total = document.querySelectorAll('#questions-column .q-nav-btn').length || document.querySelectorAll('#questions-column .question-block').length || 0;
+          const graded = document.querySelectorAll('#questions-column .grade-badge').length || document.querySelectorAll('#questions-column .q-dot').length || 0;
+          const prog = document.getElementById('grade-progress');
+          const label = document.getElementById('grade-all-label');
+          if (prog) {
+            prog.textContent = `Graded ${graded}/${total}`;
+          }
+          // short delay to let the user see the result
+          setTimeout(function () {
+            if (label) label.textContent = 'Grade All';
+            if (prog) prog.classList.add('d-none');
+            gradeBtn.disabled = false;
+          }, 1200);
+        } catch (e) { /* ignore */ }
+      });
+    }
+
+    // After HTMX swaps content, if an answer autosave indicator was updated, advance to next question
+    document.body.addEventListener('htmx:afterSwap', function (evt) {
+      try {
+        const target = evt && evt.detail && evt.detail.target;
+        if (!target) return;
+        const id = target.id || '';
+        if (id.startsWith('save-ind-')) {
+          const pk = id.replace('save-ind-', '');
+          const block = document.getElementById('question-' + pk);
+          if (!block) return;
+          const allBlocks = Array.from(document.querySelectorAll('.q-detail .question-block'));
+          const currentIdx = allBlocks.indexOf(block);
+          const next = allBlocks[currentIdx + 1];
+          if (next) selectQuestion(parseInt(next.dataset.pk, 10));
+        }
+      } catch (e) { console.error(e); }
     });
   });
 })();

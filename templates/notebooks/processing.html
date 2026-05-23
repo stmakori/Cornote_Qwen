@@ -3,8 +3,8 @@
 
 {% block content %}
 <div class="d-flex align-items-center justify-content-center min-vh-100 px-3">
-  <div class="processing-htmx-root text-center w-100" style="max-width:480px;">
-    {# innerHTML swap keeps this element (and hx polling) alive; partial must not duplicate this id #}
+    <div class="processing-htmx-root text-center w-100" style="max-width:480px;">
+    {# innerHTML swap keeps polling simple while the page stays on the same route #}
     <div id="processing-htmx"
          hx-get="{% url 'notebooks:status' notebook.pk %}"
          hx-trigger="load delay:400ms, every 2s"

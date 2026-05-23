@@ -505,6 +505,63 @@ body.cornote-body {
 }
 .notes-render .notes-placeholder { color: var(--text-muted); font-style: italic; }
 
+/* ── Markdown output from marked.parse() inside notes-render ── */
+.notes-render h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--primary);
+  margin: 1.6rem 0 .4rem;
+  padding-bottom: .2rem;
+  border-bottom: 1px solid var(--bg-border);
+  letter-spacing: .01em;
+}
+.notes-render h3 {
+  font-size: .92rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 1.2rem 0 .3rem;
+}
+.notes-render h4 {
+  font-size: .88rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: .9rem 0 .25rem;
+}
+.notes-render p {
+  margin: 0 0 .75rem;
+  line-height: 1.85;
+}
+.notes-render strong { color: var(--primary); font-weight: 700; }
+.notes-render em { color: var(--text-secondary); font-style: italic; }
+.notes-render ul, .notes-render ol {
+  margin: 0 0 .9rem 1.2rem;
+  padding-left: .3rem;
+}
+.notes-render li {
+  margin-bottom: .35rem;
+  line-height: 1.7;
+}
+.notes-render blockquote {
+  margin: .6rem 0 .9rem;
+  padding: .5rem .85rem;
+  border-left: 3px solid var(--primary);
+  background: var(--bg-elevated);
+  border-radius: 0 4px 4px 0;
+  color: var(--text-secondary);
+  font-size: .86rem;
+}
+.notes-render hr {
+  border: none;
+  border-top: 1px solid var(--bg-border);
+  margin: 1.2rem 0;
+}
+.notes-render code {
+  background: var(--bg-elevated);
+  padding: .1em .35em;
+  border-radius: 3px;
+  font-size: .84em;
+}
+
 .notes-flow {
   max-width: 52rem;
 }

@@ -1,9 +1,20 @@
 import json
 import logging
 import time
+from io import BytesIO
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+try:
+    from gtts import gTTS
+except ImportError:  # pragma: no cover - handled at runtime
+    gTTS = None
+
+try:
+    import edge_tts
+except ImportError:  # pragma: no cover - handled at runtime
+    edge_tts = None
 
 # ── Provider helpers ───────────────────────────────────────────
 
@@ -28,12 +39,20 @@ def _get_client():
             base_url='https://api.groq.com/openai/v1',
             timeout=timeout,
         )
+    if provider == 'gemini':
+        if not settings.GEMINI_API_KEY:
+            raise ValueError('GEMINI_API_KEY is not set. Add it to your .env file.')
+        return OpenAI(
+            api_key=settings.GEMINI_API_KEY,
+            base_url='https://generativelanguage.googleapis.com/v1beta/openai/',
+            timeout=timeout,
+        )
     if provider == 'openai':
         if not settings.OPENAI_API_KEY:
             raise ValueError('OPENAI_API_KEY is not set. Add it to your .env file.')
         return OpenAI(api_key=settings.OPENAI_API_KEY, timeout=timeout)
     raise ValueError(
-        f'Unknown AI_PROVIDER "{provider}" in settings. Must be "openai" or "groq".'
+        f'Unknown AI_PROVIDER "{provider}" in settings. Must be "openai", "groq", or "gemini".'
     )
 
 
@@ -62,6 +81,8 @@ def friendly_error(exc) -> str:
 def _model():
     if settings.AI_PROVIDER == 'groq':
         return settings.GROQ_MODEL_ID
+    if settings.AI_PROVIDER == 'gemini':
+        return settings.GEMINI_MODEL_ID
     return getattr(settings, 'OPENAI_CHAT_MODEL', 'gpt-4o-mini')
 
 
@@ -131,6 +152,145 @@ def _parse_json(content, fallback=None):
 
 
 # ── Public API ─────────────────────────────────────────────────
+
+def _deduplicate_sections(text: str) -> str:
+    """Strip any ## section whose heading already appeared earlier (model loop guard)."""
+    import re
+    # Split at every line that starts a ## heading, keeping the delimiter on the right part
+    parts = re.split(r'\n(?=## )', text)
+    seen: set[str] = set()
+    kept: list[str] = []
+    for part in parts:
+        m = re.match(r'## (.+?)(?:\n|$)', part)
+        if m:
+            key = m.group(1).strip().lower()
+            if key in seen:
+                continue  # whole repeated section dropped
+            seen.add(key)
+        kept.append(part)
+    return '\n'.join(kept)
+
+
+def _format_chunk(chunk: str, chunk_num: int, total_chunks: int) -> str:
+    """Format a single chunk of text as Markdown notes."""
+    context = f" (part {chunk_num} of {total_chunks})" if total_chunks > 1 else ""
+    prompt = f"""You are a study-notes formatter. The text below was extracted from a student's document{context} and may be messy (broken lines, page numbers, no headings).
+
+Reformat it into clean, well-structured Markdown following these rules:
+
+STRUCTURE — identify and mark different levels clearly:
+- `## Heading` — use for every distinct major topic or section title found in the text
+- `### Sub-heading` — use for sub-topics or named sub-sections within a major section
+- `#### Minor heading` — use for named items within a sub-section (e.g. a specific law, theorem, or concept with its own block)
+- Do not invent headings; only promote text that already acts as a title or section label
+- Place a blank line before and after every heading
+
+CONTENT inside sections:
+- Use `- ` bullet points for lists of facts, steps, properties, or examples
+- Use `**term**` bold for key vocabulary, defined terms, and important names
+- Use `> blockquote` for formal definitions (e.g. "Definition: ...")
+- Use numbered lists `1.` only when order matters (steps, processes, ranked items)
+- Write concisely — prefer bullet points over full prose sentences
+
+CLEANUP:
+- Remove page numbers, running headers/footers, and extraction artifacts
+- Preserve ALL information — do not skip or summarise content
+- Do not add content that isn't in the original text
+- Output each section EXACTLY ONCE — stop as soon as all input content is formatted
+
+Text to format:
+{chunk}
+
+Return only the formatted Markdown, nothing else."""
+
+    result = _chat(
+        [{'role': 'user', 'content': prompt}],
+        temperature=0.2,
+        max_tokens=8000,
+    )
+    return _deduplicate_sections(result)
+
+
+def _strip_repeated_page_headers(text: str) -> str:
+    """Strip PDF running page headers fused to the start of every paragraph.
+
+    pdfplumber + _clean_text joins each page's header line with the first
+    content line, producing paragraphs that all share a long common prefix
+    (e.g. 'ACMP446:… yegen8@gmail.com') but then diverge.  We find that
+    shared prefix and strip it, keeping the actual content that follows.
+    """
+    paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+    n = len(paragraphs)
+    if n < 3:
+        return text
+
+    min_share = max(3, int(n * 0.4))  # prefix must appear in ≥40% of paragraphs
+
+    # Extend the prefix character-by-character as long as min_share paragraphs agree
+    ref = paragraphs[0]
+    prefix_len = 0
+    for i in range(1, min(len(ref) + 1, 300)):
+        candidate = ref[:i]
+        if sum(1 for p in paragraphs if p.startswith(candidate)) >= min_share:
+            prefix_len = i
+        else:
+            break
+
+    if prefix_len < 10:  # too short to be a real running header
+        return text
+
+    header = ref[:prefix_len]
+    cleaned = []
+    for p in paragraphs:
+        if p.startswith(header):
+            remainder = p[prefix_len:].strip()
+            if remainder:
+                cleaned.append(remainder)
+        else:
+            cleaned.append(p)
+
+    return '\n\n'.join(cleaned)
+
+
+def format_notes_as_markdown(text: str) -> str:
+    """Reformat raw extracted document text into clean structured Markdown notes.
+
+    Splits large documents into chunks to avoid hitting output token limits,
+    which causes models to repeat sections.
+    """
+    CHUNK_SIZE = 6000   # chars per chunk — leaves room for 8000-token output
+    MAX_CHARS  = 80000  # ~50 pages; beyond this the document is truncated
+    text = _strip_repeated_page_headers(text.strip())
+    if len(text) > MAX_CHARS:
+        text = text[:MAX_CHARS]
+
+    if len(text) <= CHUNK_SIZE:
+        return _format_chunk(text, 1, 1)
+
+    # Split on paragraph boundaries to avoid cutting mid-sentence
+    paragraphs = text.split('\n\n')
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for para in paragraphs:
+        if current_len + len(para) > CHUNK_SIZE and current:
+            chunks.append('\n\n'.join(current))
+            current = [para]
+            current_len = len(para)
+        else:
+            current.append(para)
+            current_len += len(para) + 2
+
+    if current:
+        chunks.append('\n\n'.join(current))
+
+    formatted_parts = [
+        _format_chunk(chunk, i + 1, len(chunks))
+        for i, chunk in enumerate(chunks)
+    ]
+    return _deduplicate_sections('\n\n'.join(formatted_parts))
+
 
 def generate_questions(pdf_text: str) -> list[dict]:
     prompt = f"""You are an expert educator creating Cornell-style study questions.
@@ -301,22 +461,110 @@ Provide a clear, well-structured summary."""
     )
 
 
-def generate_audio_summary(text: str) -> bytes:
+def generate_audio_summary(text: str) -> tuple[bytes, str, str]:
     """
-    Generate audio using OpenAI TTS.
-    Always uses OpenAI regardless of AI_PROVIDER - Groq has no TTS endpoint.
+    Generate a server-side summary audio file.
+
+    Returns a tuple of (audio_bytes, file_extension, content_type).
+    OpenAI/Groq use MP3. Gemini uses the native Gemini TTS API when it works
+    and returns WAV, otherwise the function falls back to MP3-producing engines.
     """
     if not text or not text.strip():
         raise ValueError('No text provided for audio generation.')
-    if not settings.OPENAI_API_KEY:
-        raise ValueError('Audio summaries require OPENAI_API_KEY even when using Groq for text.')
 
-    from openai import OpenAI
+    text = text[:5000]
 
-    client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=_http_timeout())
-    response = client.audio.speech.create(
-        model='tts-1',
-        voice='nova',
-        input=text[:5000],
-    )
-    return response.content
+    def _gemini_tts_bytes(summary_text: str) -> bytes:
+        import wave
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model=getattr(settings, 'GEMINI_TTS_MODEL_ID', 'gemini-2.5-flash-preview-tts'),
+            contents=summary_text,
+            config=types.GenerateContentConfig(
+                response_modalities=['AUDIO'],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=getattr(settings, 'GEMINI_TTS_VOICE', 'Kore'),
+                        )
+                    )
+                ),
+            ),
+        )
+        part = response.candidates[0].content.parts[0]
+        pcm_data = part.inline_data.data
+        if not pcm_data:
+            raise ValueError('Gemini TTS returned empty audio data.')
+
+        # Gemini returns raw PCM (24kHz, 16-bit, mono) — wrap in a WAV container
+        buf = BytesIO()
+        with wave.open(buf, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            wf.writeframes(pcm_data)
+        return buf.getvalue()
+
+    # Try provider-specific TTS first (supports 'openai' and 'gemini' via _get_client)
+    try:
+        provider = settings.AI_PROVIDER
+        if provider == 'openai':
+            client = _get_client()
+            model = getattr(settings, 'OPENAI_TTS_MODEL', 'tts-1')
+            try:
+                response = client.audio.speech.create(
+                    model=model,
+                    voice=getattr(settings, 'TTS_VOICE', 'alloy'),
+                    input=text,
+                )
+                # Some clients return bytes in `.content`, others return raw bytes
+                audio_bytes = getattr(response, 'content', response)
+                return audio_bytes, 'mp3', 'audio/mpeg'
+            except Exception as exc:  # pragma: no cover - provider runtime errors
+                logger.warning('Provider TTS failed: %s', exc)
+                # If provider TTS fails in a recoverable way, fall through below.
+
+        if provider == 'gemini':
+            try:
+                return _gemini_tts_bytes(text), 'wav', 'audio/wav'
+            except Exception as exc:
+                logger.warning('Gemini native TTS failed: %s', exc)
+
+    except Exception:  # pragma: no cover - _get_client() errors surfaced via friendly_error elsewhere
+        pass
+
+    # Fallbacks: edge-tts, then gTTS.
+    if edge_tts is not None:
+        try:
+            import asyncio
+            import tempfile
+            from pathlib import Path
+
+            async def _save_to_tempfile() -> bytes:
+                summary_text = text
+                voice = getattr(settings, 'EDGE_TTS_VOICE', 'en-US-JennyNeural')
+                communicator = edge_tts.Communicate(summary_text, voice)
+                with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
+                    temp_path = Path(tmp.name)
+                try:
+                    await communicator.save(str(temp_path))
+                    return temp_path.read_bytes()
+                finally:
+                    try:
+                        temp_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+            return asyncio.run(_save_to_tempfile()), 'mp3', 'audio/mpeg'
+        except Exception as exc:
+            logger.warning('edge-tts fallback failed: %s', exc)
+
+    if gTTS is None:
+        raise ValueError('Audio summaries need Gemini TTS, edge-tts, or gTTS installed.')
+
+    buffer = BytesIO()
+    gTTS(text=text, lang='en').write_to_fp(buffer)
+    return buffer.getvalue(), 'mp3', 'audio/mpeg'

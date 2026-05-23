@@ -126,7 +126,7 @@ OPENAI_API_KEY = config('OPENAI_API_KEY', default='')
 MAX_PDF_SIZE_MB = config('MAX_PDF_SIZE_MB', default=50, cast=int)
 MAX_UPLOAD_MB = config('MAX_UPLOAD_MB', default=MAX_PDF_SIZE_MB, cast=int)
 
-# AI provider — set to 'openai' or 'groq'
+# AI provider — set to 'openai', 'groq', or 'gemini'
 AI_PROVIDER = config('AI_PROVIDER', default='openai')
 AI_REQUEST_TIMEOUT = config('AI_REQUEST_TIMEOUT', default=120, cast=float)
 AI_MAX_RETRIES = config('AI_MAX_RETRIES', default=3, cast=int)
@@ -135,6 +135,11 @@ OPENAI_CHAT_MODEL = config('OPENAI_CHAT_MODEL', default='gpt-4o-mini')
 # Groq settings (used when AI_PROVIDER='groq')
 GROQ_API_KEY = config('GROQ_API_KEY', default='')
 GROQ_MODEL_ID = config('GROQ_MODEL_ID', default='llama-3.3-70b-versatile')
+
+# Gemini settings (used when AI_PROVIDER='gemini')
+GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
+GEMINI_MODEL_ID = config('GEMINI_MODEL_ID', default='gemini-2.0-flash')
+GEMINI_TTS_MODEL_ID = config('GEMINI_TTS_MODEL_ID', default='gemini-3.1-flash-tts-preview')
 
 # Messages framework
 from django.contrib.messages import constants as messages

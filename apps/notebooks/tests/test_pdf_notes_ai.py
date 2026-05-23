@@ -111,6 +111,45 @@ class AIServiceMockedTests(TestCase):
                 ai_service._get_client()
         self.assertIn('OPENAI_API_KEY', str(ctx.exception))
 
+    def test_get_client_requires_key_gemini(self):
+        with override_settings(GEMINI_API_KEY='', AI_PROVIDER='gemini'):
+            with self.assertRaises(ValueError) as ctx:
+                ai_service._get_client()
+        self.assertIn('GEMINI_API_KEY', str(ctx.exception))
+
+    @patch('openai.OpenAI')
+    def test_get_client_uses_gemini_base_url(self, mock_openai):
+        with override_settings(GEMINI_API_KEY='test-key', AI_PROVIDER='gemini'):
+            ai_service._get_client()
+        mock_openai.assert_called_once()
+        kwargs = mock_openai.call_args.kwargs
+        self.assertEqual(kwargs['api_key'], 'test-key')
+        self.assertEqual(
+            kwargs['base_url'],
+            'https://generativelanguage.googleapis.com/v1beta/openai/',
+        )
+
+    @patch('google.genai.Client')
+    def test_generate_audio_summary_uses_gemini_tts(self, mock_client):
+        part = type('Part', (), {})()
+        inline_data = type('InlineData', (), {'data': b'wav-bytes'})()
+        part.inline_data = inline_data
+        content = type('Content', (), {'parts': [part]})()
+        candidate = type('Candidate', (), {'content': content})()
+        response = type('Response', (), {'candidates': [candidate]})()
+        mock_client.return_value.models.generate_content.return_value = response
+
+        with override_settings(
+            OPENAI_API_KEY='',
+            AI_PROVIDER='gemini',
+            GEMINI_API_KEY='test-key',
+            GEMINI_TTS_MODEL_ID='gemini-3.1-flash-tts-preview',
+        ):
+            audio = ai_service.generate_audio_summary('Hello world')
+
+        self.assertEqual(audio, (b'wav-bytes', 'wav', 'audio/wav'))
+        mock_client.assert_called_once()
+
 
 class DocxExtractTests(TestCase):
     def test_extract_docx_paragraph(self):

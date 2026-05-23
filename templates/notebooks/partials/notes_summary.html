@@ -32,17 +32,23 @@
         
         <button class="btn btn-sm btn-outline-accent" id="audio-summary-btn" onclick="generateAudioSummary()">
           <span id="audio-spinner" class="spinner-border spinner-border-sm me-1" style="display:none;"></span>
-          <i class="bi bi-volume-up me-1"></i>Audio Summary
+          <i class="bi bi-volume-up me-1"></i>{% if summary.audio_file %}Regenerate Audio{% else %}Audio Summary{% endif %}
         </button>
-        
+      </div>
+
+      <div id="audio-summary-container" class="mt-3">
         {% if summary.audio_file %}
-          <a href="{{ summary.audio_file.url }}" class="btn btn-sm btn-success-edu" download>
-            <i class="bi bi-download me-1"></i>Download MP3
-          </a>
+          <audio controls style="width: 100%;">
+            <source src="{{ summary.audio_file.url }}" type="audio/wav">
+            Your browser does not support the audio element.
+          </audio>
+          <div class="mt-2">
+            <a href="{{ summary.audio_file.url }}" download class="btn btn-sm btn-outline-primary">
+              <i class="bi bi-download me-1"></i>Download Audio
+            </a>
+          </div>
         {% endif %}
       </div>
-      
-      <div id="audio-summary-container" class="mt-3"></div>
     {% else %}
       <p class="text-muted small mb-0">Summary will be generated when you request it.</p>
     {% endif %}
@@ -50,6 +56,186 @@
 {% endif %}
 
 <script>
+// Track retry counts per notebook to implement exponential backoff
+window.audioRetryState = window.audioRetryState || {};
+window.audioPlaybackState = window.audioPlaybackState || {};
+
+function getSummaryText() {
+  return (document.querySelector('.summary-content')?.innerText || '').trim();
+}
+
+function splitForSpeech(text) {
+  return text
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .flatMap((sentence) => {
+      if (sentence.length <= 180) return [sentence];
+      const parts = [];
+      for (let i = 0; i < sentence.length; i += 180) {
+        parts.push(sentence.slice(i, i + 180));
+      }
+      return parts;
+    })
+    .filter(Boolean);
+}
+
+function renderBrowserAudioControls(message) {
+  const container = document.getElementById('audio-summary-container');
+  if (!container) return;
+  container.innerHTML = `
+    <div class="alert alert-warning mb-3" role="alert">
+      <i class="bi bi-speaker me-2"></i>${message}
+    </div>
+    <div class="p-3 rounded" style="background:var(--bg-elevated);border:1px solid var(--bg-border);">
+      <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-2">
+        <div class="small text-muted" id="browser-audio-status">Ready to play in your browser</div>
+      </div>
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <button type="button" class="btn btn-sm btn-outline-accent" id="browser-audio-play">
+          <i class="bi bi-play-fill me-1"></i>Play
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="browser-audio-pause" disabled>
+          <i class="bi bi-pause-fill me-1"></i>Pause
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="browser-audio-resume" disabled>
+          <i class="bi bi-arrow-clockwise me-1"></i>Resume
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-danger" id="browser-audio-stop" disabled>
+          <i class="bi bi-stop-fill me-1"></i>Stop
+        </button>
+      </div>
+    </div>`;
+
+  const playBtn = document.getElementById('browser-audio-play');
+  const pauseBtn = document.getElementById('browser-audio-pause');
+  const resumeBtn = document.getElementById('browser-audio-resume');
+  const stopBtn = document.getElementById('browser-audio-stop');
+  const statusEl = document.getElementById('browser-audio-status');
+  const text = getSummaryText();
+  const chunks = splitForSpeech(text);
+  const notebookKey = currentNotebookKey();
+
+  if (!window.speechSynthesis) {
+    if (statusEl) statusEl.textContent = 'Browser speech is not supported here.';
+    if (playBtn) playBtn.disabled = true;
+    return;
+  }
+
+  window.audioPlaybackState[notebookKey] = {
+    chunks,
+    index: 0,
+    utterance: null,
+    stopped: false,
+    paused: false,
+  };
+
+  function setStatus(status) {
+    if (statusEl) statusEl.textContent = status;
+  }
+
+  function setButtons({ playing = false, paused = false } = {}) {
+    if (playBtn) playBtn.disabled = playing;
+    if (pauseBtn) pauseBtn.disabled = !playing || paused;
+    if (resumeBtn) resumeBtn.disabled = !paused;
+    if (stopBtn) stopBtn.disabled = !playing && !paused;
+  }
+
+  function speakChunk(index) {
+    const state = window.audioPlaybackState[notebookKey];
+    if (!state || state.stopped || index >= state.chunks.length) {
+      setStatus('Playback finished');
+      setButtons({ playing: false, paused: false });
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(state.chunks[index]);
+    utterance.lang = navigator.language || 'en-US';
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    utterance.onstart = () => {
+      setStatus(`Playing in your browser (${index + 1}/${state.chunks.length})`);
+      setButtons({ playing: true, paused: false });
+      state.utterance = utterance;
+      state.index = index;
+      state.paused = false;
+    };
+    utterance.onend = () => {
+      const nextIndex = index + 1;
+      state.index = nextIndex;
+      state.utterance = null;
+      if (!state.stopped && nextIndex < state.chunks.length) {
+        speakChunk(nextIndex);
+        return;
+      }
+      state.stopped = false;
+      setStatus('Playback finished');
+      setButtons({ playing: false, paused: false });
+    };
+    utterance.onerror = () => {
+      state.utterance = null;
+      if (!state.stopped && index + 1 < state.chunks.length) {
+        speakChunk(index + 1);
+        return;
+      }
+      setStatus('Browser speech is unavailable or was interrupted.');
+      setButtons({ playing: false, paused: false });
+    };
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function currentNotebookKey() {
+    return document.querySelector('[data-notebook-pk]')?.dataset.notebookPk || window.NOTEBOOK_PK;
+  }
+
+  if (playBtn) playBtn.addEventListener('click', () => {
+    const state = window.audioPlaybackState[notebookKey];
+    if (!state || !state.chunks.length) {
+      setStatus('No summary text is available to read.');
+      return;
+    }
+    state.stopped = false;
+    state.paused = false;
+    window.speechSynthesis.cancel();
+    setTimeout(() => speakChunk(state.index || 0), 50);
+  });
+  if (pauseBtn) pauseBtn.addEventListener('click', () => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.pause();
+    setStatus('Playback paused');
+    setButtons({ playing: true, paused: true });
+    const state = window.audioPlaybackState[notebookKey];
+    if (state) state.paused = true;
+  });
+  if (resumeBtn) resumeBtn.addEventListener('click', () => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.resume();
+    setStatus('Playback resumed');
+    setButtons({ playing: true, paused: false });
+    const state = window.audioPlaybackState[notebookKey];
+    if (state) state.paused = false;
+  });
+  if (stopBtn) stopBtn.addEventListener('click', () => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    setStatus('Playback stopped');
+    setButtons({ playing: false, paused: false });
+    const state = window.audioPlaybackState[notebookKey];
+    if (state) {
+      state.stopped = true;
+      state.index = 0;
+      state.utterance = null;
+      state.paused = false;
+    }
+  });
+
+  setButtons({ playing: false, paused: false });
+}
+
+function playBrowserAudioFallback(message) {
+  renderBrowserAudioControls(message);
+}
+
 function copySummaryToClipboard() {
   const summaryText = document.querySelector('.summary-content').innerText;
   navigator.clipboard.writeText(summaryText).then(() => {
@@ -64,10 +250,16 @@ function generateAudioSummary() {
   const btn = document.getElementById('audio-summary-btn');
   const spinner = document.getElementById('audio-spinner');
   const notebookPk = document.querySelector('[data-notebook-pk]')?.dataset.notebookPk || window.NOTEBOOK_PK;
-  
+
+  // initialize retry state
+  if (!window.audioRetryState[notebookPk]) {
+    window.audioRetryState[notebookPk] = {count: 0};
+  }
+  const state = window.audioRetryState[notebookPk];
+
   spinner.style.display = 'inline-block';
   btn.disabled = true;
-  
+
   const csrf = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('csrftoken='))?.split('=')[1]||'';
   fetch(`/notebooks/${notebookPk}/audio-summary/`, {
     method: 'POST',
@@ -77,8 +269,10 @@ function generateAudioSummary() {
   .then(data => {
     spinner.style.display = 'none';
     btn.disabled = false;
-    
+
     if (data.success) {
+      const audioType = data.audio_content_type || 'audio/mpeg';
+      const audioLabel = audioType === 'audio/wav' ? 'Download WAV' : 'Download MP3';
       const container = document.getElementById('audio-summary-container');
       container.innerHTML = `
         <div class="alert alert-success alert-dismissible fade show" role="alert">
@@ -86,28 +280,74 @@ function generateAudioSummary() {
           <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
         <div class="mt-3">
-          <audio controls style="width: 100%; height: 40px; border-radius: 6px;">
-            <source src="${data.audio_url}" type="audio/mpeg">
+          <audio controls style="width: 100%;">
+            <source src="${data.audio_url}" type="${audioType}">
             Your browser does not support the audio element.
           </audio>
           <div class="mt-2">
             <a href="${data.audio_url}" download class="btn btn-sm btn-outline-primary">
-              <i class="bi bi-download me-1"></i>Download MP3
+              <i class="bi bi-download me-1"></i>${audioLabel}
             </a>
           </div>
         </div>
       `;
       btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Audio Ready';
+      // reset retry state on success
+      window.audioRetryState[notebookPk] = {count: 0};
     } else {
+      const fallbackText = (data.fallback_text || document.querySelector('.summary-content')?.innerText || '').trim();
+      if (fallbackText && window.speechSynthesis) {
+        playBrowserAudioFallback('Server audio generation failed, so you can play the summary in your browser instead.');
+        btn.innerHTML = '<i class="bi bi-volume-up me-1"></i>Browser Audio';
+        return;
+      }
+      // increment retry count and compute cooldown
+      state.count = (state.count || 0) + 1;
+      const cooldown = Math.min(30, Math.pow(2, state.count));
+      const retryId = `audio-retry-${notebookPk}`;
       const container = document.getElementById('audio-summary-container');
-      container.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+      container.innerHTML = `
+        <div class="alert alert-danger d-flex justify-content-between align-items-center">
+          <div>${data.error}</div>
+          <div>
+            <button id="${retryId}" class="btn btn-sm btn-outline-secondary" disabled>Retry</button>
+          </div>
+        </div>`;
+      // enable retry after cooldown seconds
+      setTimeout(() => {
+        const retryBtn = document.getElementById(retryId);
+        if (retryBtn) retryBtn.disabled = false;
+      }, cooldown * 1000);
       btn.innerHTML = '<i class="bi bi-volume-up me-1"></i>Audio Summary';
     }
   })
   .catch(err => {
     spinner.style.display = 'none';
     btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-exclamation-circle me-1"></i>Error';
+    const fallbackText = document.querySelector('.summary-content')?.innerText?.trim() || '';
+    if (fallbackText && window.speechSynthesis) {
+      playBrowserAudioFallback('Server audio generation failed, so you can play the summary in your browser instead.');
+      btn.innerHTML = '<i class="bi bi-volume-up me-1"></i>Browser Audio';
+      return;
+    }
+    // increment retry count and compute cooldown
+    state.count = (state.count || 0) + 1;
+    const cooldown = Math.min(30, Math.pow(2, state.count));
+    const retryId = `audio-retry-${notebookPk}`;
+    const container = document.getElementById('audio-summary-container');
+    container.innerHTML = `
+      <div class="alert alert-danger d-flex justify-content-between align-items-center">
+        <div>Audio generation failed. Network or service error occurred.</div>
+        <div>
+          <button id="${retryId}" class="btn btn-sm btn-outline-secondary" disabled>Retry</button>
+        </div>
+      </div>`;
+    // enable retry after cooldown seconds
+    setTimeout(() => {
+      const retryBtn = document.getElementById(retryId);
+      if (retryBtn) retryBtn.disabled = false;
+    }, cooldown * 1000);
+    btn.innerHTML = '<i class="bi bi-volume-up me-1"></i>Audio Summary';
     console.error('Audio generation error:', err);
   });
 }

@@ -11,6 +11,7 @@ urlpatterns = [
     path('<int:pk>/status/', views.notebook_status, name='status'),
     path('<int:pk>/', views.notebook_detail, name='detail'),
     path('<int:pk>/save-notes/', views.save_notes, name='save_notes'),
+    path('<int:pk>/reformat-notes/', views.reformat_notes, name='reformat_notes'),
     path('<int:pk>/save-summary/', views.save_summary, name='save_summary'),
     path('<int:pk>/grade/', views.grade_answers, name='grade_answers'),
     path('<int:pk>/summary-feedback/', views.summary_feedback, name='summary_feedback'),

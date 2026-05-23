@@ -15,7 +15,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="notebook-workspace">
+<div class="notebook-workspace" data-notebook-pk="{{ notebook.pk }}">
 <!-- ── Notebook Toolbar ── -->
 <div class="notebook-toolbar d-flex align-items-center justify-content-between px-3 px-md-4 py-2 flex-wrap gap-3">
   <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -39,13 +39,14 @@
       <i class="bi bi-keyboard"></i>
     </button>
     <!-- Grade All -->
-    <button class="btn btn-sm btn-outline-accent"
+    <button id="grade-all-btn" class="btn btn-sm btn-outline-accent"
             hx-post="{% url 'notebooks:grade_answers' notebook.pk %}"
             hx-target="#questions-column"
             hx-swap="innerHTML"
             hx-indicator="#grade-spinner">
       <span id="grade-spinner" class="htmx-indicator spinner-border spinner-border-sm me-1"></span>
-      <i class="bi bi-check2-circle me-1"></i>Grade All
+      <i class="bi bi-check2-circle me-1"></i><span id="grade-all-label">Grade All</span>
+      <span id="grade-progress" class="ms-2 text-muted small d-none"></span>
     </button>
 
     <!-- Tools dropdown -->
@@ -112,6 +113,12 @@
       <i class="bi bi-file-text me-2"></i>Notes
       <div class="ms-auto d-flex align-items-center gap-2">
         <span id="notes-save-indicator"></span>
+        <!-- Reformat notes with AI -->
+        <button class="btn btn-ghost btn-sm py-0 {% if notebook.notes_html %}d-none{% endif %}"
+                id="reformat-notes-btn" onclick="reformatNotes()" title="AI reformat notes">
+          <span id="reformat-spinner" class="spinner-border spinner-border-sm d-none" style="width:.7rem;height:.7rem;"></span>
+          <i class="bi bi-stars" style="font-size:.8rem;" id="reformat-icon"></i>
+        </button>
         <!-- Edit/View toggle (hidden when Quill is active) -->
         <button class="btn btn-ghost btn-sm py-0 {% if notebook.notes_html %}d-none{% endif %}"
                 id="notes-edit-btn" onclick="toggleNotesView()" title="Edit notes">
@@ -266,9 +273,9 @@
       </div>
       <div class="modal-body p-0 h-100 d-flex flex-column">
         {% if notebook.is_pdf_embeddable %}
-        <iframe src="{{ notebook.pdf_file.url }}" width="100%" height="100%"
-                style="border:none;display:block;min-height:75vh;flex:1;"
-                title="Source PDF"></iframe>
+        <iframe data-src="{{ notebook.pdf_file.url }}" width="100%" height="100%"
+          style="border:none;display:block;min-height:75vh;flex:1;"
+          title="Source PDF"></iframe>
         {% else %}
         <div class="p-4 text-center text-muted flex-fill d-flex flex-column align-items-center justify-content-center">
           <i class="bi bi-file-earmark-text display-4 mb-3 text-accent"></i>
@@ -287,6 +294,17 @@
     </div>
   </div>
 </div>
+
+<script>
+  document.addEventListener('shown.bs.modal', function (evt) {
+    const modal = evt.target;
+    if (!modal || modal.id !== 'pdfViewerModal') return;
+    const iframe = modal.querySelector('iframe[data-src]');
+    if (iframe && !iframe.getAttribute('src')) {
+      iframe.src = iframe.dataset.src;
+    }
+  });
+</script>
 
 <!-- hidden fields for session logging -->
 <form id="session-form" method="post" action="{% url 'notebooks:log_session' notebook.pk %}">
@@ -354,7 +372,45 @@
 
   function renderNotesView() {
     const ta = document.getElementById('plain-notes');
-    document.getElementById('notes-render').innerHTML = notesTextToHtml(ta.value);
+    const el = document.getElementById('notes-render');
+    const text = ta.value;
+    function doRender() {
+      el.innerHTML = text.trim()
+        ? marked.parse(text)
+        : '<p class="notes-placeholder">Your notes will appear here after processing…</p>';
+    }
+    if (window.marked) { doRender(); }
+    else { document.addEventListener('markedReady', doRender); }
+  }
+
+  function reformatNotes() {
+    const btn = document.getElementById('reformat-notes-btn');
+    const spinner = document.getElementById('reformat-spinner');
+    const icon = document.getElementById('reformat-icon');
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    icon.classList.add('d-none');
+
+    fetch(`/notebooks/${NOTEBOOK_PK}/reformat-notes/`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': CSRF },
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) {
+        const ta = document.getElementById('plain-notes');
+        ta.value = data.notes;
+        renderNotesView();
+      } else {
+        alert(data.error || 'Reformatting failed. Please try again.');
+      }
+    })
+    .catch(() => alert('Network error. Please try again.'))
+    .finally(() => {
+      btn.disabled = false;
+      spinner.classList.add('d-none');
+      icon.classList.remove('d-none');
+    });
   }
 
   function toggleNotesView() {
@@ -526,6 +582,7 @@
 
   // Expose for inline onclick handlers used in template/partials.
   window.switchSummaryTab = switchSummaryTab;
+  window.reformatNotes = reformatNotes;
   window.generateAiSummary = generateAiSummary;
   window.getFeedback = getFeedback;
 

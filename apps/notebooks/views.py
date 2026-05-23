@@ -39,7 +39,11 @@ def _process_notebook(notebook_id: int):
         if notebook.processing_stage < Notebook.STAGE_TEXT:
             body = extract_document_text(file_path, original_name)
             notebook.pdf_text = body
-            notebook.notes_content = body
+            try:
+                notebook.notes_content = ai_service.format_notes_as_markdown(body)
+            except Exception as exc:
+                logger.warning('Notes formatting failed for notebook %s: %s', notebook_id, exc)
+                notebook.notes_content = body
             notebook.processing_stage = Notebook.STAGE_TEXT
             notebook.save(update_fields=['pdf_text', 'notes_content', 'processing_stage'])
 
@@ -152,8 +156,7 @@ def upload_pdf(request):
 @login_required
 def notebook_processing(request, pk):
     notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
-    if notebook.status == Notebook.STATUS_READY:
-        return redirect('notebooks:detail', pk=pk)
+    # Keep the processing URL stable even after a refresh.
     return render(request, 'notebooks/processing.html', {'notebook': notebook})
 
 
@@ -162,10 +165,6 @@ def notebook_status(request, pk):
     """HTMX polling endpoint — when the notebook is ready, respond with HX-Redirect to the detail page."""
     notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
     notebook.refresh_from_db(fields=['status', 'error_message', 'processing_stage'])
-    if notebook.is_ready:
-        if request.htmx:
-            return HttpResponseClientRedirect(reverse('notebooks:detail', args=[pk]))
-        return redirect('notebooks:detail', pk=pk)
     resp = render(request, 'notebooks/partials/processing_status.html', {'notebook': notebook})
     resp['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     return resp
@@ -176,8 +175,10 @@ def notebook_status(request, pk):
 @login_required
 def notebook_detail(request, pk):
     notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
+    # If notebook is still processing, render the processing view inline so
+    # reloading the notebook URL doesn't redirect the user to the upload flow.
     if not notebook.is_ready:
-        return redirect('notebooks:processing', pk=pk)
+        return render(request, 'notebooks/processing.html', {'notebook': notebook})
 
     questions = notebook.questions.prefetch_related('answer').all()
     summary, _ = Summary.objects.get_or_create(notebook=notebook)
@@ -278,6 +279,27 @@ def grade_answers(request, pk):
         'graded': graded,
         'notebook': notebook,
     })
+
+
+# ────────────────────────── Reformat Notes ──────────────────────────
+
+@login_required
+@require_POST
+def reformat_notes(request, pk):
+    """AI-reformat the raw extracted notes into clean structured Markdown."""
+    notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
+    text = notebook.pdf_text or notebook.notes_content
+    if not text.strip():
+        return JsonResponse({'error': 'No content to format.'}, status=400)
+    try:
+        formatted = ai_service.format_notes_as_markdown(text)
+        notebook.notes_content = formatted
+        notebook.notes_html = ''
+        notebook.save(update_fields=['notes_content', 'notes_html'])
+        return JsonResponse({'success': True, 'notes': formatted})
+    except Exception as exc:
+        logger.exception('Reformat notes failed for notebook %s', pk)
+        return JsonResponse({'error': ai_service.friendly_error(exc)}, status=500)
 
 
 # ────────────────────────── HTMX: Summary Auto-save ──────────────────────────
@@ -403,8 +425,8 @@ def generate_audio_summary(request, pk):
                 'success': False
             }, status=400)
         
-        # Generate audio using OpenAI TTS
-        audio_bytes = ai_service.generate_audio_summary(text_to_convert)
+        # Generate audio using the configured TTS path and persist using the real format.
+        audio_bytes, audio_ext, audio_content_type = ai_service.generate_audio_summary(text_to_convert)
         
         # Save audio to file
         import os
@@ -412,7 +434,7 @@ def generate_audio_summary(request, pk):
         audio_dir = os.path.join(settings.MEDIA_ROOT, 'audio')
         os.makedirs(audio_dir, exist_ok=True)
         
-        audio_filename = f'summary_{notebook.pk}_{int(timezone.now().timestamp())}.mp3'
+        audio_filename = f'summary_{notebook.pk}_{int(timezone.now().timestamp())}.{audio_ext}'
         audio_path = os.path.join(audio_dir, audio_filename)
         
         # Write audio content
@@ -426,6 +448,7 @@ def generate_audio_summary(request, pk):
         return JsonResponse({
             'success': True,
             'audio_url': f'{settings.MEDIA_URL}{audio_file}',
+            'audio_content_type': audio_content_type,
             'message': 'Audio summary generated successfully!'
         })
         
@@ -433,6 +456,7 @@ def generate_audio_summary(request, pk):
         logger.exception('Error generating audio summary for notebook %s', pk)
         return JsonResponse({
             'error': ai_service.friendly_error(exc),
+            'fallback_text': (text_to_convert[:5000] if 'text_to_convert' in locals() else ''),
             'success': False
         }, status=500)
 

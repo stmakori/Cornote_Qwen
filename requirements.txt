@@ -1,7 +1,11 @@
 Django==5.1.4
 python-decouple==3.8
 pdfplumber==0.11.4
+# OpenAI client also powers Groq and Gemini via OpenAI-compatible endpoints.
 openai==1.54.4
+google-genai==1.45.0
+gTTS==2.5.4
+edge-tts==6.1.12
 whitenoise==6.8.2
 Pillow==11.0.0
 django-htmx==1.21.0

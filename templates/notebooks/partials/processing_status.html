@@ -17,6 +17,19 @@
   </div>
 </div>
 
+{% elif notebook.is_ready %}
+<div class="processing-status-body">
+  <i class="bi bi-check-circle-fill text-success display-3 mb-3"></i>
+  <h2 class="h5 fw-semibold text-success">Notebook is ready</h2>
+  <p class="text-muted mt-2 mb-4">Your notebook has finished processing. You can open it whenever you're ready.</p>
+  <div class="d-flex gap-2 justify-content-center flex-wrap">
+    <a href="{% url 'notebooks:detail' notebook.pk %}" class="btn btn-accent">
+      <i class="bi bi-journal-text me-2"></i>Open notebook
+    </a>
+    <a href="{% url 'notebooks:dashboard' %}" class="btn btn-ghost">Dashboard</a>
+  </div>
+</div>
+
 {% else %}
 <div class="processing-status-body">
   <div class="processing-spinner mb-4">
