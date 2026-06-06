@@ -59,7 +59,10 @@ def _process_notebook(notebook_id: int):
             notebook.save(update_fields=['processing_stage'])
 
         if notebook.processing_stage < Notebook.STAGE_QUESTIONS:
-            questions_data = ai_service.generate_questions(truncated)
+            questions_data = ai_service.generate_questions(
+                truncated,
+                count=notebook.target_question_count,
+            )
             Question.objects.filter(notebook=notebook).delete()
             for idx, q_data in enumerate(questions_data):
                 question = Question.objects.create(
@@ -389,7 +392,14 @@ def generate_notes_summary(request, pk):
     summary, _ = Summary.objects.get_or_create(notebook=notebook)
     
     try:
-        if not summary.ai_summary:
+        refresh = request.POST.get('refresh') or request.GET.get('refresh')
+        # Regenerate if: no summary yet, user requested refresh, or old summary looks truncated
+        needs_generation = (
+            not summary.ai_summary
+            or refresh
+            or len(summary.ai_summary) < 300
+        )
+        if needs_generation:
             summary.ai_summary = ai_service.generate_notes_summary(notebook.pdf_text)
             summary.save(update_fields=['ai_summary'])
         

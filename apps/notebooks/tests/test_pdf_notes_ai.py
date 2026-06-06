@@ -105,21 +105,23 @@ class AIServiceMockedTests(TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]['question_text'], 'What is X?')
 
-    def test_get_client_requires_key_openai(self):
-        with override_settings(OPENAI_API_KEY='', AI_PROVIDER='openai'):
-            with self.assertRaises(ValueError) as ctx:
-                ai_service._get_client()
-        self.assertIn('OPENAI_API_KEY', str(ctx.exception))
+    @patch.object(ai_service, '_chat')
+    def test_generate_questions_uses_requested_count(self, mock_chat):
+        mock_chat.return_value = '{"questions":[]}'
+        with self.assertRaises(ValueError):
+            ai_service.generate_questions('Some course text about X.', count=7)
+        prompt = mock_chat.call_args.args[0][0]['content']
+        self.assertIn('exactly 7 open-ended study questions', prompt)
 
     def test_get_client_requires_key_gemini(self):
-        with override_settings(GEMINI_API_KEY='', AI_PROVIDER='gemini'):
+        with override_settings(GEMINI_API_KEY=''):
             with self.assertRaises(ValueError) as ctx:
                 ai_service._get_client()
         self.assertIn('GEMINI_API_KEY', str(ctx.exception))
 
     @patch('openai.OpenAI')
     def test_get_client_uses_gemini_base_url(self, mock_openai):
-        with override_settings(GEMINI_API_KEY='test-key', AI_PROVIDER='gemini'):
+        with override_settings(GEMINI_API_KEY='test-key'):
             ai_service._get_client()
         mock_openai.assert_called_once()
         kwargs = mock_openai.call_args.kwargs
@@ -140,14 +142,14 @@ class AIServiceMockedTests(TestCase):
         mock_client.return_value.models.generate_content.return_value = response
 
         with override_settings(
-            OPENAI_API_KEY='',
-            AI_PROVIDER='gemini',
             GEMINI_API_KEY='test-key',
             GEMINI_TTS_MODEL_ID='gemini-3.1-flash-tts-preview',
         ):
             audio = ai_service.generate_audio_summary('Hello world')
 
-        self.assertEqual(audio, (b'wav-bytes', 'wav', 'audio/wav'))
+        self.assertEqual(audio[1:], ('wav', 'audio/wav'))
+        self.assertTrue(audio[0].startswith(b'RIFF'))
+        self.assertIn(b'wav-bytes', audio[0])
         mock_client.assert_called_once()
 
 

@@ -8,7 +8,7 @@ from .services.document_processor import ALLOWED_EXTENSIONS, allowed_upload_suff
 class PDFUploadForm(forms.ModelForm):
     class Meta:
         model = Notebook
-        fields = ('title', 'pdf_file')
+        fields = ('title', 'pdf_file', 'target_question_count')
         widgets = {
             'title': forms.TextInput(attrs={
                 'class': 'form-control form-control-lg',
@@ -18,16 +18,29 @@ class PDFUploadForm(forms.ModelForm):
                 'class': 'form-control',
                 'accept': ','.join(sorted(ALLOWED_EXTENSIONS)),
             }),
+            'target_question_count': forms.NumberInput(attrs={
+                'class': 'form-control',
+                'min': 1,
+                'max': 10,
+                'step': 1,
+            }),
         }
         labels = {
             'pdf_file': 'Study document',
+            'target_question_count': 'Number of questions',
         }
         help_texts = {
             'pdf_file': (
                 f'PDF, Word (.docx), or plain text (.txt, .md). '
                 f'Max {getattr(settings, "MAX_UPLOAD_MB", settings.MAX_PDF_SIZE_MB)} MB.'
             ),
+            'target_question_count': 'Choose between 1 and 10 questions.',
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['target_question_count'].required = False
+        self.fields['target_question_count'].initial = 5
 
     def clean_pdf_file(self):
         pdf = self.cleaned_data.get('pdf_file')

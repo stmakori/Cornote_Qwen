@@ -26,33 +26,16 @@ def _http_timeout():
 
 
 def _get_client():
-    """Return an OpenAI-compatible client for the configured AI provider."""
+    """Return an OpenAI-compatible client for Gemini."""
     from openai import OpenAI
 
-    provider = settings.AI_PROVIDER
     timeout = _http_timeout()
-    if provider == 'groq':
-        if not settings.GROQ_API_KEY:
-            raise ValueError('GROQ_API_KEY is not set. Add it to your .env file.')
-        return OpenAI(
-            api_key=settings.GROQ_API_KEY,
-            base_url='https://api.groq.com/openai/v1',
-            timeout=timeout,
-        )
-    if provider == 'gemini':
-        if not settings.GEMINI_API_KEY:
-            raise ValueError('GEMINI_API_KEY is not set. Add it to your .env file.')
-        return OpenAI(
-            api_key=settings.GEMINI_API_KEY,
-            base_url='https://generativelanguage.googleapis.com/v1beta/openai/',
-            timeout=timeout,
-        )
-    if provider == 'openai':
-        if not settings.OPENAI_API_KEY:
-            raise ValueError('OPENAI_API_KEY is not set. Add it to your .env file.')
-        return OpenAI(api_key=settings.OPENAI_API_KEY, timeout=timeout)
-    raise ValueError(
-        f'Unknown AI_PROVIDER "{provider}" in settings. Must be "openai", "groq", or "gemini".'
+    if not settings.GEMINI_API_KEY:
+        raise ValueError('GEMINI_API_KEY is not set. Add it to your .env file.')
+    return OpenAI(
+        api_key=settings.GEMINI_API_KEY,
+        base_url='https://generativelanguage.googleapis.com/v1beta/openai/',
+        timeout=timeout,
     )
 
 
@@ -61,8 +44,7 @@ def friendly_error(exc) -> str:
     try:
         from openai import AuthenticationError, RateLimitError, APIConnectionError, BadRequestError, APIStatusError, APITimeoutError
         if isinstance(exc, AuthenticationError):
-            provider = settings.AI_PROVIDER.upper()
-            return f'Invalid API key - check your {provider}_API_KEY in .env.'
+            return 'Invalid Gemini API key - check GEMINI_API_KEY in .env.'
         if isinstance(exc, RateLimitError):
             return 'Rate limit reached - wait a moment and try again.'
         if isinstance(exc, (APIConnectionError, APITimeoutError)):
@@ -79,11 +61,7 @@ def friendly_error(exc) -> str:
 
 
 def _model():
-    if settings.AI_PROVIDER == 'groq':
-        return settings.GROQ_MODEL_ID
-    if settings.AI_PROVIDER == 'gemini':
-        return settings.GEMINI_MODEL_ID
-    return getattr(settings, 'OPENAI_CHAT_MODEL', 'gpt-4o-mini')
+    return settings.GEMINI_MODEL_ID
 
 
 def _is_transient_ai_error(exc) -> bool:
@@ -292,10 +270,11 @@ def format_notes_as_markdown(text: str) -> str:
     return _deduplicate_sections('\n\n'.join(formatted_parts))
 
 
-def generate_questions(pdf_text: str) -> list[dict]:
+def generate_questions(pdf_text: str, count: int = 5) -> list[dict]:
+    count = max(1, min(int(count), 10))
     prompt = f"""You are an expert educator creating Cornell-style study questions.
 
-Given the following text from a student's PDF, generate 5 to 10 open-ended study questions \
+Given the following text from a student's PDF, generate exactly {count} open-ended study questions \
 that test deep understanding of the key concepts. Questions should be specific, meaningful, \
 and require the student to think critically.
 
@@ -321,7 +300,7 @@ Respond ONLY with valid JSON in this exact format:
     content = _chat(
         [{'role': 'user', 'content': prompt}],
         temperature=0.7,
-        max_tokens=2000,
+        max_tokens=1000 + (count * 700),
         json_mode=True,
     )
     data = _parse_json(content, fallback={'questions': []})
@@ -438,27 +417,84 @@ Respond ONLY with valid JSON:
     return data.get('key_points', [])
 
 
-def generate_notes_summary(pdf_text: str) -> str:
-    prompt = f"""You are an expert educator creating a concise study summary.
+def _summarize_chunk(chunk: str, chunk_num: int, total: int) -> str:
+    """Extract key points from one chunk of the document."""
+    part_label = f" (part {chunk_num} of {total})" if total > 1 else ""
+    prompt = f"""You are an expert educator. Extract ALL key concepts, facts, definitions, and important details from the study material below{part_label}.
 
-From the following study material, create a well-organised summary that:
-- Captures the most important concepts
-- Uses clear formatting with sections
-- Is suitable for quick review before exams
-- Is roughly 200-300 words
-- Uses bullet points where appropriate
+Rules:
+- Use ## headings for each distinct topic found in this section
+- Use bullet points under each heading
+- Bold **key terms**
+- Keep every important fact — do not skip anything
+- Do not add anything not in the text
 
 MATERIAL:
-{pdf_text[:8000]}
+{chunk}
 
-Provide a clear, well-structured summary."""
+Return only the structured key points."""
 
     return _chat(
         [{'role': 'user', 'content': prompt}],
-        temperature=0.5,
-        max_tokens=1500,
-        json_mode=False,
+        temperature=0.3,
+        max_tokens=2000,
     )
+
+
+def _consolidate_summaries(parts: list[str]) -> str:
+    """Merge chunk summaries into one clean, complete summary."""
+    combined = '\n\n---\n\n'.join(parts)
+    prompt = f"""You are an expert educator. Below are structured key-point extracts from different sections of a student's study document. Combine them into one complete, well-organised summary.
+
+Rules:
+- Merge related topics under unified ## section headings
+- Eliminate exact duplicates but keep all unique facts
+- Use bullet points and sub-bullets throughout
+- Bold **key terms** and definitions
+- Aim for 600–900 words — cover everything, do not cut content short
+- The summary must be suitable for exam revision
+
+SECTION EXTRACTS:
+{combined}
+
+Return only the final merged summary."""
+
+    return _chat(
+        [{'role': 'user', 'content': prompt}],
+        temperature=0.4,
+        max_tokens=3500,
+    )
+
+
+def generate_notes_summary(pdf_text: str) -> str:
+    """Map-reduce summary: covers the full document regardless of length."""
+    CHUNK_SIZE = 10000  # chars — safe input size per API call
+
+    text = pdf_text.strip()
+    if not text:
+        return ''
+
+    if len(text) <= CHUNK_SIZE:
+        return _consolidate_summaries([_summarize_chunk(text, 1, 1)])
+
+    # Split on paragraph boundaries
+    paragraphs = text.split('\n\n')
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for para in paragraphs:
+        if current_len + len(para) > CHUNK_SIZE and current:
+            chunks.append('\n\n'.join(current))
+            current = [para]
+            current_len = len(para)
+        else:
+            current.append(para)
+            current_len += len(para) + 2
+    if current:
+        chunks.append('\n\n'.join(current))
+
+    parts = [_summarize_chunk(c, i + 1, len(chunks)) for i, c in enumerate(chunks)]
+    return _consolidate_summaries(parts)
 
 
 def generate_audio_summary(text: str) -> tuple[bytes, str, str]:
@@ -508,30 +544,11 @@ def generate_audio_summary(text: str) -> tuple[bytes, str, str]:
             wf.writeframes(pcm_data)
         return buf.getvalue()
 
-    # Try provider-specific TTS first (supports 'openai' and 'gemini' via _get_client)
+    # Try Gemini native TTS first.
     try:
-        provider = settings.AI_PROVIDER
-        if provider == 'openai':
-            client = _get_client()
-            model = getattr(settings, 'OPENAI_TTS_MODEL', 'tts-1')
-            try:
-                response = client.audio.speech.create(
-                    model=model,
-                    voice=getattr(settings, 'TTS_VOICE', 'alloy'),
-                    input=text,
-                )
-                # Some clients return bytes in `.content`, others return raw bytes
-                audio_bytes = getattr(response, 'content', response)
-                return audio_bytes, 'mp3', 'audio/mpeg'
-            except Exception as exc:  # pragma: no cover - provider runtime errors
-                logger.warning('Provider TTS failed: %s', exc)
-                # If provider TTS fails in a recoverable way, fall through below.
-
-        if provider == 'gemini':
-            try:
-                return _gemini_tts_bytes(text), 'wav', 'audio/wav'
-            except Exception as exc:
-                logger.warning('Gemini native TTS failed: %s', exc)
+        return _gemini_tts_bytes(text), 'wav', 'audio/wav'
+    except Exception as exc:
+        logger.warning('Gemini native TTS failed: %s', exc)
 
     except Exception:  # pragma: no cover - _get_client() errors surfaced via friendly_error elsewhere
         pass

@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 
 class Notebook(models.Model):
@@ -26,6 +27,11 @@ class Notebook(models.Model):
     description = models.TextField(blank=True)  # User description
     
     pdf_file = models.FileField(upload_to='documents/%Y/%m/')
+    target_question_count = models.PositiveSmallIntegerField(
+        default=5,
+        validators=[MinValueValidator(1), MaxValueValidator(10)],
+        help_text='How many AI-generated study questions to create',
+    )
     pdf_text = models.TextField(blank=True)
     notes_content = models.TextField(blank=True, help_text='User-edited version of the extracted notes')
     

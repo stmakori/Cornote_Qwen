@@ -29,16 +29,69 @@
         <button class="btn btn-sm btn-outline-primary" id="copy-summary-btn" onclick="copySummaryToClipboard()">
           <i class="bi bi-clipboard me-1"></i>Copy
         </button>
-        
+        <button class="btn btn-sm btn-outline-secondary"
+                hx-post="{% url 'notebooks:generate_notes_summary' notebook.pk %}?refresh=1"
+                hx-target="#notes-summary-section"
+                hx-swap="innerHTML"
+                hx-indicator="#summary-regen-spinner">
+          <span id="summary-regen-spinner" class="htmx-indicator spinner-border spinner-border-sm me-1"></span>
+          <i class="bi bi-arrow-clockwise me-1"></i>Regenerate
+        </button>
+
         <button class="btn btn-sm btn-outline-accent" id="audio-summary-btn" onclick="generateAudioSummary()">
-          <span id="audio-spinner" class="spinner-border spinner-border-sm me-1" style="display:none;"></span>
-          <i class="bi bi-volume-up me-1"></i>{% if summary.audio_file %}Regenerate Audio{% else %}Audio Summary{% endif %}
+          <i class="bi bi-volume-up me-1" id="audio-btn-icon"></i>
+          <span id="audio-btn-label">{% if summary.audio_file %}Regenerate Audio{% else %}Audio Summary{% endif %}</span>
         </button>
       </div>
 
+      <style>
+        #audio-summary-container { transition: opacity 0.35s ease; }
+        #audio-summary-container.audio-loading { opacity: 1; }
+        #audio-summary-container.audio-ready { animation: audioFadeIn 0.4s ease forwards; }
+        @keyframes audioFadeIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .audio-skeleton {
+          background: linear-gradient(90deg, var(--bg-elevated) 25%, var(--bg-border, #e0e0e0) 50%, var(--bg-elevated) 75%);
+          background-size: 200% 100%;
+          animation: audioSkeleton 1.4s ease infinite;
+          border-radius: 8px;
+          height: 52px;
+        }
+        @keyframes audioSkeleton {
+          0%   { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+        .audio-waveform {
+          display: flex;
+          align-items: center;
+          gap: 3px;
+          height: 24px;
+        }
+        .audio-waveform span {
+          display: inline-block;
+          width: 4px;
+          border-radius: 2px;
+          background: var(--bs-primary, #0d6efd);
+          animation: waveBar 1s ease-in-out infinite;
+        }
+        .audio-waveform span:nth-child(1) { height: 8px;  animation-delay: 0s; }
+        .audio-waveform span:nth-child(2) { height: 18px; animation-delay: 0.1s; }
+        .audio-waveform span:nth-child(3) { height: 24px; animation-delay: 0.2s; }
+        .audio-waveform span:nth-child(4) { height: 14px; animation-delay: 0.3s; }
+        .audio-waveform span:nth-child(5) { height: 20px; animation-delay: 0.4s; }
+        .audio-waveform span:nth-child(6) { height: 10px; animation-delay: 0.5s; }
+        .audio-waveform span:nth-child(7) { height: 16px; animation-delay: 0.15s; }
+        @keyframes waveBar {
+          0%, 100% { transform: scaleY(0.4); opacity: 0.5; }
+          50%       { transform: scaleY(1);   opacity: 1; }
+        }
+      </style>
+
       <div id="audio-summary-container" class="mt-3">
         {% if summary.audio_file %}
-          <audio controls style="width: 100%;">
+          <audio controls preload="auto" style="width: 100%;">
             <source src="{{ summary.audio_file.url }}" type="audio/wav">
             Your browser does not support the audio element.
           </audio>
@@ -246,19 +299,45 @@ function copySummaryToClipboard() {
   });
 }
 
-function generateAudioSummary() {
+function _setAudioBtnLoading(loading) {
   const btn = document.getElementById('audio-summary-btn');
-  const spinner = document.getElementById('audio-spinner');
+  const icon = document.getElementById('audio-btn-icon');
+  const label = document.getElementById('audio-btn-label');
+  if (!btn) return;
+  btn.disabled = loading;
+  if (loading) {
+    if (icon) { icon.className = ''; icon.style.display = 'none'; }
+    if (label) label.innerHTML = '<span class="audio-waveform"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></span><span class="ms-2" style="font-size:.8rem;vertical-align:middle;">Generating…</span>';
+  } else {
+    if (icon) { icon.className = 'bi bi-volume-up me-1'; icon.style.display = ''; }
+    if (label) label.textContent = 'Audio Summary';
+  }
+}
+
+function _showAudioSkeleton() {
+  const container = document.getElementById('audio-summary-container');
+  if (!container) return;
+  container.className = 'mt-3 audio-loading';
+  container.innerHTML = '<div class="audio-skeleton"></div>';
+}
+
+function _revealAudioPlayer(html) {
+  const container = document.getElementById('audio-summary-container');
+  if (!container) return;
+  container.innerHTML = html;
+  container.className = 'mt-3 audio-ready';
+}
+
+function generateAudioSummary() {
   const notebookPk = document.querySelector('[data-notebook-pk]')?.dataset.notebookPk || window.NOTEBOOK_PK;
 
-  // initialize retry state
   if (!window.audioRetryState[notebookPk]) {
     window.audioRetryState[notebookPk] = {count: 0};
   }
   const state = window.audioRetryState[notebookPk];
 
-  spinner.style.display = 'inline-block';
-  btn.disabled = true;
+  _setAudioBtnLoading(true);
+  _showAudioSkeleton();
 
   const csrf = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('csrftoken='))?.split('=')[1]||'';
   fetch(`/notebooks/${notebookPk}/audio-summary/`, {
@@ -267,87 +346,90 @@ function generateAudioSummary() {
   })
   .then(res => res.json())
   .then(data => {
-    spinner.style.display = 'none';
-    btn.disabled = false;
+    _setAudioBtnLoading(false);
 
     if (data.success) {
       const audioType = data.audio_content_type || 'audio/mpeg';
       const audioLabel = audioType === 'audio/wav' ? 'Download WAV' : 'Download MP3';
-      const container = document.getElementById('audio-summary-container');
-      container.innerHTML = `
-        <div class="alert alert-success alert-dismissible fade show" role="alert">
-          <i class="bi bi-check-circle me-2"></i>${data.message}
-          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      _revealAudioPlayer(`
+        <audio controls preload="auto" style="width:100%;border-radius:8px;">
+          <source src="${data.audio_url}" type="${audioType}">
+          Your browser does not support the audio element.
+        </audio>
+        <div class="mt-2">
+          <a href="${data.audio_url}" download class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-download me-1"></i>${audioLabel}
+          </a>
         </div>
-        <div class="mt-3">
-          <audio controls style="width: 100%;">
-            <source src="${data.audio_url}" type="${audioType}">
-            Your browser does not support the audio element.
-          </audio>
-          <div class="mt-2">
-            <a href="${data.audio_url}" download class="btn btn-sm btn-outline-primary">
-              <i class="bi bi-download me-1"></i>${audioLabel}
-            </a>
-          </div>
-        </div>
-      `;
-      btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Audio Ready';
-      // reset retry state on success
+      `);
+      const icon = document.getElementById('audio-btn-icon');
+      const label = document.getElementById('audio-btn-label');
+      if (icon) icon.className = 'bi bi-check-circle me-1';
+      if (label) label.textContent = 'Audio Ready';
       window.audioRetryState[notebookPk] = {count: 0};
     } else {
       const fallbackText = (data.fallback_text || document.querySelector('.summary-content')?.innerText || '').trim();
       if (fallbackText && window.speechSynthesis) {
-        playBrowserAudioFallback('Server audio generation failed, so you can play the summary in your browser instead.');
-        btn.innerHTML = '<i class="bi bi-volume-up me-1"></i>Browser Audio';
+        playBrowserAudioFallback('Server audio generation failed — playing in your browser instead.');
+        const label = document.getElementById('audio-btn-label');
+        if (label) label.textContent = 'Browser Audio';
         return;
       }
-      // increment retry count and compute cooldown
       state.count = (state.count || 0) + 1;
       const cooldown = Math.min(30, Math.pow(2, state.count));
       const retryId = `audio-retry-${notebookPk}`;
-      const container = document.getElementById('audio-summary-container');
-      container.innerHTML = `
+      _revealAudioPlayer(`
         <div class="alert alert-danger d-flex justify-content-between align-items-center">
           <div>${data.error}</div>
-          <div>
-            <button id="${retryId}" class="btn btn-sm btn-outline-secondary" disabled>Retry</button>
-          </div>
-        </div>`;
-      // enable retry after cooldown seconds
-      setTimeout(() => {
+          <button id="${retryId}" class="btn btn-sm btn-outline-secondary ms-2" disabled>Retry in ${cooldown}s</button>
+        </div>`);
+      let remaining = cooldown;
+      const retryTimer = setInterval(() => {
+        remaining--;
         const retryBtn = document.getElementById(retryId);
-        if (retryBtn) retryBtn.disabled = false;
-      }, cooldown * 1000);
-      btn.innerHTML = '<i class="bi bi-volume-up me-1"></i>Audio Summary';
+        if (!retryBtn) { clearInterval(retryTimer); return; }
+        if (remaining <= 0) {
+          clearInterval(retryTimer);
+          retryBtn.disabled = false;
+          retryBtn.textContent = 'Retry';
+          retryBtn.addEventListener('click', generateAudioSummary, {once: true});
+        } else {
+          retryBtn.textContent = `Retry in ${remaining}s`;
+        }
+      }, 1000);
     }
   })
   .catch(err => {
-    spinner.style.display = 'none';
-    btn.disabled = false;
+    _setAudioBtnLoading(false);
     const fallbackText = document.querySelector('.summary-content')?.innerText?.trim() || '';
     if (fallbackText && window.speechSynthesis) {
-      playBrowserAudioFallback('Server audio generation failed, so you can play the summary in your browser instead.');
-      btn.innerHTML = '<i class="bi bi-volume-up me-1"></i>Browser Audio';
+      playBrowserAudioFallback('Server audio generation failed — playing in your browser instead.');
+      const label = document.getElementById('audio-btn-label');
+      if (label) label.textContent = 'Browser Audio';
       return;
     }
-    // increment retry count and compute cooldown
     state.count = (state.count || 0) + 1;
     const cooldown = Math.min(30, Math.pow(2, state.count));
     const retryId = `audio-retry-${notebookPk}`;
-    const container = document.getElementById('audio-summary-container');
-    container.innerHTML = `
+    _revealAudioPlayer(`
       <div class="alert alert-danger d-flex justify-content-between align-items-center">
-        <div>Audio generation failed. Network or service error occurred.</div>
-        <div>
-          <button id="${retryId}" class="btn btn-sm btn-outline-secondary" disabled>Retry</button>
-        </div>
-      </div>`;
-    // enable retry after cooldown seconds
-    setTimeout(() => {
+        <div>Audio generation failed. Network or service error.</div>
+        <button id="${retryId}" class="btn btn-sm btn-outline-secondary ms-2" disabled>Retry in ${cooldown}s</button>
+      </div>`);
+    let remaining = cooldown;
+    const retryTimer = setInterval(() => {
+      remaining--;
       const retryBtn = document.getElementById(retryId);
-      if (retryBtn) retryBtn.disabled = false;
-    }, cooldown * 1000);
-    btn.innerHTML = '<i class="bi bi-volume-up me-1"></i>Audio Summary';
+      if (!retryBtn) { clearInterval(retryTimer); return; }
+      if (remaining <= 0) {
+        clearInterval(retryTimer);
+        retryBtn.disabled = false;
+        retryBtn.textContent = 'Retry';
+        retryBtn.addEventListener('click', generateAudioSummary, {once: true});
+      } else {
+        retryBtn.textContent = `Retry in ${remaining}s`;
+      }
+    }, 1000);
     console.error('Audio generation error:', err);
   });
 }
