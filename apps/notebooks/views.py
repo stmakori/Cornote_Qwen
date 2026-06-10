@@ -254,7 +254,8 @@ def grade_answers(request, pk):
             continue
         if not answer.user_answer.strip():
             answer.grade = Answer.GRADE_INCORRECT
-            answer.feedback = 'No answer provided.'
+            expected_keywords_str = ', '.join(question.expected_keywords) if question.expected_keywords else 'N/A'
+            answer.feedback = f'No answer provided. Expected concepts: {expected_keywords_str}'
             answer.graded_at = timezone.now()
             answer.save()
             graded.append((question, answer))
@@ -327,9 +328,16 @@ def summary_feedback(request, pk):
     summary.user_summary = request.POST.get('user_summary', summary.user_summary)
     summary.save(update_fields=['user_summary'])
 
+    if not summary.key_points:
+        try:
+            summary.key_points = ai_service.extract_key_points(notebook.pdf_text or notebook.notes_content)
+            summary.save(update_fields=['key_points'])
+        except Exception as exc:
+            logger.warning('Failed to extract key points dynamically: %s', exc)
+
     try:
         result = ai_service.evaluate_summary(
-            pdf_text=notebook.pdf_text,
+            pdf_text=notebook.pdf_text or notebook.notes_content,
             key_points=summary.key_points,
             user_summary=summary.user_summary,
         )
@@ -400,9 +408,23 @@ def generate_notes_summary(request, pk):
             or len(summary.ai_summary) < 300
         )
         if needs_generation:
-            summary.ai_summary = ai_service.generate_notes_summary(notebook.pdf_text)
+            source_text = notebook.pdf_text or notebook.notes_content or ''
+            if not source_text.strip():
+                return render(request, 'notebooks/partials/notes_summary.html', {
+                    'error': 'No content available to summarise. Upload a document or add notes first.',
+                    'summary': summary,
+                    'notebook': notebook,
+                })
+            new_summary = ai_service.generate_notes_summary(source_text)
+            if not new_summary.strip():
+                return render(request, 'notebooks/partials/notes_summary.html', {
+                    'error': 'The AI could not generate a summary. Please try again.',
+                    'summary': summary,
+                    'notebook': notebook,
+                })
+            summary.ai_summary = new_summary
             summary.save(update_fields=['ai_summary'])
-        
+
         return render(request, 'notebooks/partials/notes_summary.html', {
             'summary': summary,
             'notebook': notebook,

@@ -312,7 +312,8 @@ Respond ONLY with valid JSON in this exact format:
 
 def grade_answer(question_text: str, expected_answer: str, expected_keywords: list, user_answer: str) -> dict:
     if not user_answer or not user_answer.strip():
-        return {'grade': 'incorrect', 'feedback': 'No answer provided.'}
+        keywords_str = ', '.join(expected_keywords) if expected_keywords else 'N/A'
+        return {'grade': 'incorrect', 'feedback': f'No answer provided. Expected concepts: {keywords_str}'}
 
     keywords_str = ', '.join(expected_keywords) if expected_keywords else 'N/A'
     prompt = f"""You are a supportive but honest teacher grading a student's answer.
@@ -339,7 +340,7 @@ Respond ONLY with valid JSON:
 
     content = _chat(
         [{'role': 'user', 'content': prompt}],
-        temperature=0.3,
+        temperature=0.5,
         max_tokens=300,
         json_mode=True,
     )
@@ -355,34 +356,43 @@ def evaluate_summary(pdf_text: str, key_points: list, user_summary: str) -> dict
         return {
             'included_points': [],
             'missed_points': key_points,
-            'feedback_text': 'No summary was provided. Try summarising the main ideas in your own words.',
+            'feedback_text': 'No summary was provided. Here is what you missed:',
         }
 
-    key_points_str = '\n'.join(f'- {p}' for p in key_points) if key_points else 'See PDF content below.'
-    prompt = f"""You are a supportive teacher reviewing a student's summary of study material.
+    key_points_section = ''
+    if key_points:
+        key_points_section = (
+            'Key concepts from the material:\n'
+            + '\n'.join(f'- {p}' for p in key_points)
+            + '\n\n'
+        )
 
-Key concepts/points from the material:
-{key_points_str}
+    prompt = f"""You are a knowledgeable teacher evaluating a student's summary. Be direct and specific.
 
-Reference text (first portion):
+REFERENCE MATERIAL (source of truth):
 {pdf_text[:3000]}
 
-Student's summary:
+{key_points_section}STUDENT'S SUMMARY:
 {user_summary}
 
-Identify which key points were included and which were missed, and give 2-3 sentences of feedback.
+Evaluate the student's summary thoroughly:
+1. List every key concept the student covered correctly in "included_points".
+2. List every important concept that is MISSING from their summary in "missed_points".
+3. For any statement that is INCORRECT or INACCURATE, add it to "missed_points" using this exact format: "Correction: [student wrote X, but the correct information is Y]"
+4. If the summary is off-topic or unrelated to the material, state this explicitly in "feedback_text" and briefly describe what the material actually covers.
+5. Write 2-3 sentences of direct, actionable feedback in "feedback_text" — be specific about what to improve, not just encouraging.
 
 Respond ONLY with valid JSON:
 {{
-  "included_points": ["..."],
-  "missed_points": ["..."],
-  "feedback_text": "..."
+  "included_points": ["concept the student covered correctly"],
+  "missed_points": ["missing concept", "Correction: student wrote X but actually Y"],
+  "feedback_text": "Direct, specific feedback here"
 }}"""
 
     content = _chat(
         [{'role': 'user', 'content': prompt}],
-        temperature=0.4,
-        max_tokens=800,
+        temperature=0.5,
+        max_tokens=1000,
         json_mode=True,
     )
     data = _parse_json(content, fallback={})
@@ -396,11 +406,11 @@ Respond ONLY with valid JSON:
 def extract_key_points(pdf_text: str) -> list[str]:
     prompt = f"""You are an educator extracting the most important learning points from a text.
 
-From the following text, identify 5-10 key concepts or facts that a student should \
+From the following text, identify 15-25 key concepts or facts that a student should \
 know after studying this material. Be concise - each point should be one sentence.
 
 TEXT:
-{pdf_text[:6000]}
+{pdf_text[:40000]}
 
 Respond ONLY with valid JSON:
 {{
@@ -426,7 +436,8 @@ Rules:
 - Use ## headings for each distinct topic found in this section
 - Use bullet points under each heading
 - Bold **key terms**
-- Keep every important fact — do not skip anything
+- Keep every important fact — do not skip anything. Be extremely comprehensive.
+- Detail every single topic thoroughly.
 - Do not add anything not in the text
 
 MATERIAL:
@@ -437,7 +448,7 @@ Return only the structured key points."""
     return _chat(
         [{'role': 'user', 'content': prompt}],
         temperature=0.3,
-        max_tokens=2000,
+        max_tokens=4000,
     )
 
 
@@ -451,8 +462,9 @@ Rules:
 - Eliminate exact duplicates but keep all unique facts
 - Use bullet points and sub-bullets throughout
 - Bold **key terms** and definitions
-- Aim for 600–900 words — cover everything, do not cut content short
-- The summary must be suitable for exam revision
+- Write a highly detailed summary (aim for 1000 to 1500 words).
+- Do NOT leave out any section or topic. Detail the concepts thoroughly to ensure it covers the ENTIRE document.
+- It is CRITICAL that you complete the summary with a proper conclusion and do NOT cut off abruptly.
 
 SECTION EXTRACTS:
 {combined}
@@ -462,7 +474,7 @@ Return only the final merged summary."""
     return _chat(
         [{'role': 'user', 'content': prompt}],
         temperature=0.4,
-        max_tokens=3500,
+        max_tokens=8000,
     )
 
 
@@ -518,7 +530,7 @@ def generate_audio_summary(text: str) -> tuple[bytes, str, str]:
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
         response = client.models.generate_content(
             model=getattr(settings, 'GEMINI_TTS_MODEL_ID', 'gemini-2.5-flash-preview-tts'),
-            contents=summary_text,
+            contents=f'Read the following text aloud:\n\n{summary_text}',
             config=types.GenerateContentConfig(
                 response_modalities=['AUDIO'],
                 speech_config=types.SpeechConfig(
@@ -531,7 +543,7 @@ def generate_audio_summary(text: str) -> tuple[bytes, str, str]:
             ),
         )
         part = response.candidates[0].content.parts[0]
-        pcm_data = part.inline_data.data
+        pcm_data = part.inline_data.data if part.inline_data else None
         if not pcm_data:
             raise ValueError('Gemini TTS returned empty audio data.')
 
@@ -550,38 +562,17 @@ def generate_audio_summary(text: str) -> tuple[bytes, str, str]:
     except Exception as exc:
         logger.warning('Gemini native TTS failed: %s', exc)
 
-    except Exception:  # pragma: no cover - _get_client() errors surfaced via friendly_error elsewhere
-        pass
-
-    # Fallbacks: edge-tts, then gTTS.
-    if edge_tts is not None:
-        try:
-            import asyncio
-            import tempfile
-            from pathlib import Path
-
-            async def _save_to_tempfile() -> bytes:
-                summary_text = text
-                voice = getattr(settings, 'EDGE_TTS_VOICE', 'en-US-JennyNeural')
-                communicator = edge_tts.Communicate(summary_text, voice)
-                with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
-                    temp_path = Path(tmp.name)
-                try:
-                    await communicator.save(str(temp_path))
-                    return temp_path.read_bytes()
-                finally:
-                    try:
-                        temp_path.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-
-            return asyncio.run(_save_to_tempfile()), 'mp3', 'audio/mpeg'
-        except Exception as exc:
-            logger.warning('edge-tts fallback failed: %s', exc)
-
+    # Fallback: gTTS (Google Translate TTS — no API key required).
     if gTTS is None:
-        raise ValueError('Audio summaries need Gemini TTS, edge-tts, or gTTS installed.')
+        raise ValueError('Audio generation failed. Install gTTS: pip install gTTS')
 
-    buffer = BytesIO()
-    gTTS(text=text, lang='en').write_to_fp(buffer)
-    return buffer.getvalue(), 'mp3', 'audio/mpeg'
+    try:
+        buffer = BytesIO()
+        gTTS(text=text, lang='en').write_to_fp(buffer)
+        audio_bytes = buffer.getvalue()
+        if not audio_bytes:
+            raise ValueError('gTTS returned empty audio.')
+        return audio_bytes, 'mp3', 'audio/mpeg'
+    except Exception as exc:
+        logger.warning('gTTS fallback failed: %s', exc)
+        raise

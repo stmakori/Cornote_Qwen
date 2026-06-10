@@ -177,10 +177,6 @@
         <i class="bi bi-lightning-fill"></i>
         <span>AI Summary</span>
       </button>
-      <button class="summary-tab-btn" onclick="switchSummaryTab('feedback-content', this)" type="button">
-        <i class="bi bi-stars"></i>
-        <span>Feedback</span>
-      </button>
     </nav>
 
     <!-- Tab Content -->
@@ -228,7 +224,7 @@
       <div class="p-3">
         <button type="button" class="btn btn-primary-edu w-100 mb-3" id="ai-summary-btn" onclick="generateAiSummary()">
           <span id="ai-spinner" class="spinner-border spinner-border-sm me-2 d-none"></span>
-          <i class="bi bi-lightning-fill me-2"></i>Generate AI Summary
+          <i class="bi bi-arrow-clockwise me-2"></i>{% if summary.ai_summary %}Regenerate AI Summary{% else %}Generate AI Summary{% endif %}
         </button>
         <div id="ai-summary-content">
           {% if summary.ai_summary %}
@@ -238,20 +234,6 @@
           {% endif %}
         </div>
       </div>
-    </div>
-
-    <!-- Feedback Tab -->
-    <div class="summary-panel d-none" id="feedback-content">
-      {% if summary.feedback_text %}
-        <div class="p-3">
-          {% include 'notebooks/partials/summary_feedback.html' %}
-        </div>
-      {% else %}
-        <div class="p-4 text-center text-muted">
-          <i class="bi bi-chat-dots display-6 mb-3 d-block"></i>
-          <p>No feedback yet. Write your summary first and get feedback!</p>
-        </div>
-      {% endif %}
     </div>
 
     </div>{# end .summary-tab-content #}
@@ -518,7 +500,7 @@
 
     btn.disabled = true;
     spinner.classList.remove('d-none');
-    fetch('{% url "notebooks:notes_summary" notebook.pk %}', {
+    fetch('{% url "notebooks:notes_summary" notebook.pk %}?refresh=true', {
       method: 'POST',
       headers: { 'X-CSRFToken': CSRF },
     })

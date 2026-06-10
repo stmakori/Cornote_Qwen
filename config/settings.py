@@ -133,7 +133,7 @@ AI_MAX_RETRIES = config('AI_MAX_RETRIES', default=3, cast=int)
 # Gemini settings
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 GEMINI_MODEL_ID = config('GEMINI_MODEL_ID', default='gemini-2.5-flash')
-GEMINI_TTS_MODEL_ID = config('GEMINI_TTS_MODEL_ID', default='gemini-3.1-flash-tts-preview')
+GEMINI_TTS_MODEL_ID = config('GEMINI_TTS_MODEL_ID', default='gemini-2.5-flash-preview-tts')
 
 # Messages framework
 from django.contrib.messages import constants as messages
