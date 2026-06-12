@@ -481,6 +481,7 @@ Return only the final merged summary."""
 def generate_notes_summary(pdf_text: str) -> str:
     """Map-reduce summary: covers the full document regardless of length."""
     CHUNK_SIZE = 10000  # chars — safe input size per API call
+    CONSOLIDATE_BATCH = 4  # max parts to merge in a single consolidation pass
 
     text = pdf_text.strip()
     if not text:
@@ -506,6 +507,16 @@ def generate_notes_summary(pdf_text: str) -> str:
         chunks.append('\n\n'.join(current))
 
     parts = [_summarize_chunk(c, i + 1, len(chunks)) for i, c in enumerate(chunks)]
+
+    # Hierarchical consolidation: repeatedly merge in batches until one pass remains.
+    # This ensures no single consolidation call receives more input than it can handle,
+    # so the full document is always covered regardless of length.
+    while len(parts) > CONSOLIDATE_BATCH:
+        batched: list[str] = []
+        for i in range(0, len(parts), CONSOLIDATE_BATCH):
+            batched.append(_consolidate_summaries(parts[i : i + CONSOLIDATE_BATCH]))
+        parts = batched
+
     return _consolidate_summaries(parts)
 
 
