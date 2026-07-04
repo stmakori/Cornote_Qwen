@@ -125,15 +125,20 @@ SESSION_COOKIE_AGE = 86400 * 30  # 30 days
 MAX_PDF_SIZE_MB = config('MAX_PDF_SIZE_MB', default=50, cast=int)
 MAX_UPLOAD_MB = config('MAX_UPLOAD_MB', default=MAX_PDF_SIZE_MB, cast=int)
 
-# Gemini-only AI provider
-AI_PROVIDER = 'gemini'
+# Claude/Anthropic AI provider
+AI_PROVIDER = 'anthropic'
 AI_REQUEST_TIMEOUT = config('AI_REQUEST_TIMEOUT', default=120, cast=float)
 AI_MAX_RETRIES = config('AI_MAX_RETRIES', default=3, cast=int)
 
-# Gemini settings
-GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
-GEMINI_MODEL_ID = config('GEMINI_MODEL_ID', default='gemini-2.5-flash')
-GEMINI_TTS_MODEL_ID = config('GEMINI_TTS_MODEL_ID', default='gemini-2.5-flash-preview-tts')
+# Anthropic settings
+ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default='')
+ANTHROPIC_MODEL_ID = config('ANTHROPIC_MODEL_ID', default='claude-sonnet-5')
+ANTHROPIC_BASE_URL = config('ANTHROPIC_BASE_URL', default='https://api.anthropic.com')
+ANTHROPIC_WORKSPACE_ID = config('ANTHROPIC_WORKSPACE_ID', default='')
+AWS_REGION = config('AWS_REGION', default='us-east-2')
+AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
+AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
+AWS_SESSION_TOKEN = config('AWS_SESSION_TOKEN', default='')
 
 # Messages framework
 from django.contrib.messages import constants as messages

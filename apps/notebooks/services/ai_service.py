@@ -2,7 +2,9 @@ import json
 import logging
 import time
 from io import BytesIO
+import httpx
 from django.conf import settings
+from anthropic import Anthropic, Omit
 
 logger = logging.getLogger(__name__)
 
@@ -11,10 +13,7 @@ try:
 except ImportError:  # pragma: no cover - handled at runtime
     gTTS = None
 
-try:
-    import edge_tts
-except ImportError:  # pragma: no cover - handled at runtime
-    edge_tts = None
+ANTHROPIC_API_VERSION = '2023-06-01'
 
 # ── Provider helpers ───────────────────────────────────────────
 
@@ -26,53 +25,114 @@ def _http_timeout():
 
 
 def _get_client():
-    """Return an OpenAI-compatible client for Gemini."""
-    from openai import OpenAI
+    """Return an Anthropic client configured for the current deployment.
+    
+    Uses bearer auth for the AWS-hosted Claude key and includes the workspace header.
+    """
+    headers: dict[str, str | Omit] = {}
+    workspace_id = getattr(settings, 'ANTHROPIC_WORKSPACE_ID', '')
+    if workspace_id:
+        headers['anthropic-workspace-id'] = workspace_id
+    auth_token = getattr(settings, 'ANTHROPIC_API_KEY', '')
+    if not auth_token:
+        raise ValueError('ANTHROPIC_API_KEY must be set in .env')
 
-    timeout = _http_timeout()
-    if not settings.GEMINI_API_KEY:
-        raise ValueError('GEMINI_API_KEY is not set. Add it to your .env file.')
-    return OpenAI(
-        api_key=settings.GEMINI_API_KEY,
-        base_url='https://generativelanguage.googleapis.com/v1beta/openai/',
-        timeout=timeout,
+    headers['X-Api-Key'] = Omit()
+    return Anthropic(
+        api_key=Omit(),
+        auth_token=auth_token,
+        base_url=getattr(settings, 'ANTHROPIC_BASE_URL', 'https://api.anthropic.com'),
+        default_headers=headers or None,
+        timeout=_http_timeout(),
     )
+
+
+def _anthropic_headers() -> dict[str, str]:
+    return {}
+
+
+def _merge_message_content(content) -> str:
+    if content is None:
+        return ''
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                if block.get('type') == 'text':
+                    parts.append(block.get('text', ''))
+                elif 'text' in block:
+                    parts.append(str(block.get('text', '')))
+        return ''.join(parts)
+    return str(content)
+
+
+def _prepare_anthropic_payload(messages, temperature=0.5, max_tokens=1000, json_mode=False):
+    system_parts: list[str] = []
+    anthropic_messages: list[dict] = []
+
+    for message in messages:
+        role = message.get('role')
+        content = _merge_message_content(message.get('content'))
+        if not content:
+            continue
+        if role == 'system':
+            system_parts.append(content)
+        elif role in ('user', 'assistant'):
+            anthropic_messages.append({'role': role, 'content': content})
+
+    if json_mode:
+        system_parts.append('Return only valid JSON. Do not wrap the response in markdown fences.')
+
+    payload = {
+        'model': _model(),
+        'messages': anthropic_messages,
+        'max_tokens': max_tokens,
+    }
+    if system_parts:
+        payload['system'] = '\n\n'.join(system_parts)
+    return payload
 
 
 def friendly_error(exc) -> str:
     """Convert an API exception into a short, actionable message for the user."""
+    if isinstance(exc, ValueError):
+        message = str(exc)
+        if 'ANTHROPIC_API_KEY' in message or 'Claude returned empty response' in message:
+            return message
+        return message
     try:
-        from openai import AuthenticationError, RateLimitError, APIConnectionError, BadRequestError, APIStatusError, APITimeoutError
+        from anthropic import APIConnectionError, APIError, APITimeoutError, BadRequestError, AuthenticationError, RateLimitError
+
         if isinstance(exc, AuthenticationError):
-            return 'Invalid Gemini API key - check GEMINI_API_KEY in .env.'
+            return 'Invalid Claude auth token - check ANTHROPIC_API_KEY in .env.'
         if isinstance(exc, RateLimitError):
             return 'Rate limit reached - wait a moment and try again.'
         if isinstance(exc, (APIConnectionError, APITimeoutError)):
             return 'Could not connect to the AI service - check your internet connection.'
         if isinstance(exc, BadRequestError):
-            return f'Request rejected by the AI service: {exc.message[:120]}'
-        if isinstance(exc, APIStatusError):
-            return f'AI service error ({exc.status_code}) - try again shortly.'
+            return f'Request rejected by the AI service: {str(exc)[:120]}'
+        if isinstance(exc, APIError):
+            return 'AI service error - try again shortly.'
     except ImportError:
         pass
-    if isinstance(exc, ValueError):
-        return str(exc)
     return 'Unexpected error - please try again.'
 
 
 def _model():
-    return settings.GEMINI_MODEL_ID
+    return settings.ANTHROPIC_MODEL_ID
 
 
 def _is_transient_ai_error(exc) -> bool:
     try:
-        from openai import RateLimitError, APIConnectionError, APITimeoutError, APIStatusError
+        from anthropic import APIConnectionError, APITimeoutError, RateLimitError, APIError
 
         if isinstance(exc, (RateLimitError, APIConnectionError, APITimeoutError)):
             return True
-        if isinstance(exc, APIStatusError) and getattr(exc, 'status_code', 0) in (
-            429, 500, 502, 503, 504
-        ):
+        if isinstance(exc, APIError) and getattr(exc, 'status_code', 0) in (429, 500, 502, 503, 504):
             return True
     except ImportError:
         pass
@@ -81,16 +141,20 @@ def _is_transient_ai_error(exc) -> bool:
 
 def _chat_once(messages, temperature=0.5, max_tokens=1000, json_mode=False):
     client = _get_client()
-    kwargs = dict(
-        model=_model(),
-        messages=messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
-    if json_mode:
-        kwargs['response_format'] = {'type': 'json_object'}
-    response = client.chat.completions.create(**kwargs)
-    return response.choices[0].message.content
+    try:
+        payload = _prepare_anthropic_payload(messages, temperature, max_tokens, json_mode)
+        response = client.messages.create(**payload)
+        text_parts = []
+        for block in getattr(response, 'content', []) or []:
+            if getattr(block, 'type', None) == 'text':
+                text_parts.append(getattr(block, 'text', '') or '')
+        text = ''.join(text_parts).strip()
+        if not text:
+            raise ValueError('Claude returned empty response.')
+        return text
+    finally:
+        if hasattr(client, 'close'):
+            client.close()
 
 
 def _chat(messages, temperature=0.5, max_tokens=1000, json_mode=False):
@@ -129,12 +193,28 @@ def _parse_json(content, fallback=None):
         return fallback if fallback is not None else {}
 
 
-# ── Public API ─────────────────────────────────────────────────
-
+def _error_message_from_response(response: httpx.Response) -> str:
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            error = data.get('error')
+            if isinstance(error, dict):
+                message = error.get('message') or error.get('type')
+                if message:
+                    return str(message)
+            if isinstance(error, str):
+                return error
+            message = data.get('message') or data.get('detail')
+            if message:
+                return str(message)
+    except Exception:
+        pass
+    text = response.text.strip()
+    return text[:160] if text else 'Request was rejected by the AI service.'
 def _deduplicate_sections(text: str) -> str:
     """Strip any ## section whose heading already appeared earlier (model loop guard)."""
     import re
-    # Split at every line that starts a ## heading, keeping the delimiter on the right part
+
     parts = re.split(r'\n(?=## )', text)
     seen: set[str] = set()
     kept: list[str] = []
@@ -525,55 +605,12 @@ def generate_audio_summary(text: str) -> tuple[bytes, str, str]:
     Generate a server-side summary audio file.
 
     Returns a tuple of (audio_bytes, file_extension, content_type).
-    OpenAI/Groq use MP3. Gemini uses the native Gemini TTS API when it works
-    and returns WAV, otherwise the function falls back to MP3-producing engines.
+    The current implementation returns MP3 audio using gTTS.
     """
     if not text or not text.strip():
         raise ValueError('No text provided for audio generation.')
 
     text = text[:5000]
-
-    def _gemini_tts_bytes(summary_text: str) -> bytes:
-        import wave
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        response = client.models.generate_content(
-            model=getattr(settings, 'GEMINI_TTS_MODEL_ID', 'gemini-2.5-flash-preview-tts'),
-            contents=f'Read the following text aloud:\n\n{summary_text}',
-            config=types.GenerateContentConfig(
-                response_modalities=['AUDIO'],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name=getattr(settings, 'GEMINI_TTS_VOICE', 'Kore'),
-                        )
-                    )
-                ),
-            ),
-        )
-        part = response.candidates[0].content.parts[0]
-        pcm_data = part.inline_data.data if part.inline_data else None
-        if not pcm_data:
-            raise ValueError('Gemini TTS returned empty audio data.')
-
-        # Gemini returns raw PCM (24kHz, 16-bit, mono) — wrap in a WAV container
-        buf = BytesIO()
-        with wave.open(buf, 'wb') as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(24000)
-            wf.writeframes(pcm_data)
-        return buf.getvalue()
-
-    # Try Gemini native TTS first.
-    try:
-        return _gemini_tts_bytes(text), 'wav', 'audio/wav'
-    except Exception as exc:
-        logger.warning('Gemini native TTS failed: %s', exc)
-
-    # Fallback: gTTS (Google Translate TTS — no API key required).
     if gTTS is None:
         raise ValueError('Audio generation failed. Install gTTS: pip install gTTS')
 

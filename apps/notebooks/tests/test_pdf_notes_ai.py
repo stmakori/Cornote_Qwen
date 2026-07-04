@@ -113,44 +113,57 @@ class AIServiceMockedTests(TestCase):
         prompt = mock_chat.call_args.args[0][0]['content']
         self.assertIn('exactly 7 open-ended study questions', prompt)
 
-    def test_get_client_requires_key_gemini(self):
-        with override_settings(GEMINI_API_KEY=''):
-            with self.assertRaises(ValueError) as ctx:
-                ai_service._get_client()
-        self.assertIn('GEMINI_API_KEY', str(ctx.exception))
-
-    @patch('openai.OpenAI')
-    def test_get_client_uses_gemini_base_url(self, mock_openai):
-        with override_settings(GEMINI_API_KEY='test-key'):
+    @patch('apps.notebooks.services.ai_service.Anthropic')
+    def test_get_client_uses_anthropic_auth_token(self, mock_anthropic):
+        with override_settings(
+            ANTHROPIC_API_KEY='test-api-key',
+            ANTHROPIC_BASE_URL='https://aws-external-anthropic.us-east-2.api.aws',
+            ANTHROPIC_WORKSPACE_ID='workspace-123',
+        ):
             ai_service._get_client()
-        mock_openai.assert_called_once()
-        kwargs = mock_openai.call_args.kwargs
-        self.assertEqual(kwargs['api_key'], 'test-key')
-        self.assertEqual(
-            kwargs['base_url'],
-            'https://generativelanguage.googleapis.com/v1beta/openai/',
-        )
 
-    @patch('google.genai.Client')
-    def test_generate_audio_summary_uses_gemini_tts(self, mock_client):
-        part = type('Part', (), {})()
-        inline_data = type('InlineData', (), {'data': b'wav-bytes'})()
-        part.inline_data = inline_data
-        content = type('Content', (), {'parts': [part]})()
-        candidate = type('Candidate', (), {'content': content})()
-        response = type('Response', (), {'candidates': [candidate]})()
-        mock_client.return_value.models.generate_content.return_value = response
+        mock_anthropic.assert_called_once()
+        kwargs = mock_anthropic.call_args.kwargs
+        self.assertEqual(kwargs['api_key'].__class__.__name__, 'Omit')
+        self.assertEqual(kwargs['auth_token'], 'test-api-key')
+        self.assertEqual(kwargs['base_url'], 'https://aws-external-anthropic.us-east-2.api.aws')
+        self.assertEqual(kwargs['default_headers']['anthropic-workspace-id'], 'workspace-123')
+
+    @patch('apps.notebooks.services.ai_service.Anthropic')
+    def test_chat_once_uses_auth_token_and_workspace_header(self, mock_anthropic):
+        response = mock_anthropic.return_value.messages.create.return_value
+        response.content = [type('Block', (), {'type': 'text', 'text': 'pong'})()]
 
         with override_settings(
-            GEMINI_API_KEY='test-key',
-            GEMINI_TTS_MODEL_ID='gemini-3.1-flash-tts-preview',
+            ANTHROPIC_BASE_URL='https://aws-external-anthropic.us-east-2.api.aws',
+            ANTHROPIC_WORKSPACE_ID='workspace-123',
+            ANTHROPIC_MODEL_ID='claude-sonnet-4-20250514',
+            ANTHROPIC_API_KEY='test-api-key',
         ):
+            content = ai_service._chat_once([{'role': 'user', 'content': 'Hello'}], max_tokens=10)
+
+        self.assertEqual(content, 'pong')
+        mock_anthropic.assert_called_once()
+        kwargs = mock_anthropic.call_args.kwargs
+        self.assertEqual(kwargs['base_url'], 'https://aws-external-anthropic.us-east-2.api.aws')
+        self.assertEqual(kwargs['default_headers']['anthropic-workspace-id'], 'workspace-123')
+        self.assertEqual(kwargs['auth_token'], 'test-api-key')
+        mock_anthropic.return_value.messages.create.assert_called_once()
+        called_kwargs = mock_anthropic.return_value.messages.create.call_args.kwargs
+        self.assertEqual(called_kwargs['model'], 'claude-sonnet-4-20250514')
+        self.assertEqual(called_kwargs['max_tokens'], 10)
+        self.assertNotIn('extra_headers', called_kwargs)
+
+    @patch('apps.notebooks.services.ai_service.gTTS')
+    def test_generate_audio_summary_uses_gtts_fallback(self, mock_gtts):
+        mock_gtts.return_value.write_to_fp.side_effect = lambda buffer: buffer.write(b'mp3-bytes')
+
+        with override_settings():
             audio = ai_service.generate_audio_summary('Hello world')
 
-        self.assertEqual(audio[1:], ('wav', 'audio/wav'))
-        self.assertTrue(audio[0].startswith(b'RIFF'))
-        self.assertIn(b'wav-bytes', audio[0])
-        mock_client.assert_called_once()
+        self.assertEqual(audio[1:], ('mp3', 'audio/mpeg'))
+        self.assertEqual(audio[0], b'mp3-bytes')
+        mock_gtts.assert_called_once()
 
 
 class DocxExtractTests(TestCase):
