@@ -6,6 +6,7 @@ from io import BytesIO
 import httpx
 from django.conf import settings
 from anthropic import Anthropic, Omit
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,12 @@ except ImportError:  # pragma: no cover - handled at runtime
 ANTHROPIC_API_VERSION = '2023-06-01'
 
 # ── Provider helpers ───────────────────────────────────────────
+#
+# Qwen (via the ModelScope OpenAI-compatible API) is the primary provider for
+# all text generation: notes formatting, question generation, grading, hints,
+# and tutor chat. Anthropic Claude is kept as a separate pathway used only for
+# scanned-page math OCR/vision transcription (see transcribe_scanned_page_image),
+# since that's the one call that needs a vision-capable model.
 
 def _http_timeout():
     from httpx import Timeout
@@ -25,10 +32,26 @@ def _http_timeout():
     return Timeout(t, connect=min(30.0, t))
 
 
-def _get_client():
+def _get_qwen_client():
+    """Return an OpenAI-compatible client for Qwen (ModelScope inference API).
+
+    Used for all text generation calls (_chat).
+    """
+    api_key = getattr(settings, 'QWEN_API_KEY', '')
+    if not api_key:
+        raise ValueError('QWEN_API_KEY must be set in .env')
+    return OpenAI(
+        api_key=api_key,
+        base_url=getattr(settings, 'QWEN_BASE_URL', 'https://api-inference.modelscope.ai/v1'),
+        timeout=_http_timeout(),
+    )
+
+
+def _get_anthropic_client():
     """Return an Anthropic client configured for the current deployment.
-    
-    Uses bearer auth for the AWS-hosted Claude key and includes the workspace header.
+
+    Uses bearer auth for the AWS-hosted Claude key and includes the workspace
+    header. Only used for scanned-page math OCR/vision transcription.
     """
     headers: dict[str, str | Omit] = {}
     workspace_id = getattr(settings, 'ANTHROPIC_WORKSPACE_ID', '')
@@ -46,10 +69,6 @@ def _get_client():
         default_headers=headers or None,
         timeout=_http_timeout(),
     )
-
-
-def _anthropic_headers() -> dict[str, str]:
-    return {}
 
 
 def _merge_message_content(content) -> str:
@@ -71,40 +90,51 @@ def _merge_message_content(content) -> str:
     return str(content)
 
 
-def _prepare_anthropic_payload(messages, temperature=0.5, max_tokens=1000, json_mode=False):
-    system_parts: list[str] = []
-    anthropic_messages: list[dict] = []
-
+def _prepare_openai_messages(messages, json_mode=False):
+    openai_messages: list[dict] = []
     for message in messages:
         role = message.get('role')
         content = _merge_message_content(message.get('content'))
         if not content:
             continue
-        if role == 'system':
-            system_parts.append(content)
-        elif role in ('user', 'assistant'):
-            anthropic_messages.append({'role': role, 'content': content})
+        if role in ('system', 'user', 'assistant'):
+            openai_messages.append({'role': role, 'content': content})
 
     if json_mode:
-        system_parts.append('Return only valid JSON. Do not wrap the response in markdown fences.')
-
-    payload = {
-        'model': _model(),
-        'messages': anthropic_messages,
-        'max_tokens': max_tokens,
-    }
-    if system_parts:
-        payload['system'] = '\n\n'.join(system_parts)
-    return payload
+        note = 'Return only valid JSON. Do not wrap the response in markdown fences.'
+        if openai_messages and openai_messages[0]['role'] == 'system':
+            openai_messages[0]['content'] = f"{openai_messages[0]['content']}\n\n{note}"
+        else:
+            openai_messages.insert(0, {'role': 'system', 'content': note})
+    return openai_messages
 
 
 def friendly_error(exc) -> str:
     """Convert an API exception into a short, actionable message for the user."""
     if isinstance(exc, ValueError):
-        message = str(exc)
-        if 'ANTHROPIC_API_KEY' in message or 'Claude returned empty response' in message:
-            return message
-        return message
+        return str(exc)
+    try:
+        from openai import (
+            APIConnectionError,
+            APIError,
+            APITimeoutError,
+            AuthenticationError,
+            BadRequestError,
+            RateLimitError,
+        )
+
+        if isinstance(exc, AuthenticationError):
+            return 'Invalid Qwen API key - check QWEN_API_KEY in .env.'
+        if isinstance(exc, RateLimitError):
+            return 'Rate limit reached - wait a moment and try again.'
+        if isinstance(exc, (APIConnectionError, APITimeoutError)):
+            return 'Could not connect to the AI service - check your internet connection.'
+        if isinstance(exc, BadRequestError):
+            return f'Request rejected by the AI service: {str(exc)[:120]}'
+        if isinstance(exc, APIError):
+            return 'AI service error - try again shortly.'
+    except ImportError:
+        pass
     try:
         from anthropic import APIConnectionError, APIError, APITimeoutError, BadRequestError, AuthenticationError, RateLimitError
 
@@ -123,11 +153,24 @@ def friendly_error(exc) -> str:
     return 'Unexpected error - please try again.'
 
 
-def _model():
+def _qwen_model():
+    return settings.QWEN_MODEL_ID
+
+
+def _anthropic_model():
     return settings.ANTHROPIC_MODEL_ID
 
 
 def _is_transient_ai_error(exc) -> bool:
+    try:
+        from openai import APIConnectionError, APITimeoutError, RateLimitError, APIError
+
+        if isinstance(exc, (RateLimitError, APIConnectionError, APITimeoutError)):
+            return True
+        if isinstance(exc, APIError) and getattr(exc, 'status_code', 0) in (429, 500, 502, 503, 504):
+            return True
+    except ImportError:
+        pass
     try:
         from anthropic import APIConnectionError, APITimeoutError, RateLimitError, APIError
 
@@ -141,17 +184,18 @@ def _is_transient_ai_error(exc) -> bool:
 
 
 def _chat_once(messages, temperature=0.5, max_tokens=1000, json_mode=False):
-    client = _get_client()
+    client = _get_qwen_client()
     try:
-        payload = _prepare_anthropic_payload(messages, temperature, max_tokens, json_mode)
-        response = client.messages.create(**payload)
-        text_parts = []
-        for block in getattr(response, 'content', []) or []:
-            if getattr(block, 'type', None) == 'text':
-                text_parts.append(getattr(block, 'text', '') or '')
-        text = ''.join(text_parts).strip()
+        openai_messages = _prepare_openai_messages(messages, json_mode)
+        response = client.chat.completions.create(
+            model=_qwen_model(),
+            messages=openai_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        text = (response.choices[0].message.content or '').strip()
         if not text:
-            raise ValueError('Claude returned empty response.')
+            raise ValueError('Qwen returned empty response.')
         return text
     finally:
         if hasattr(client, 'close'):
@@ -182,10 +226,10 @@ def _chat(messages, temperature=0.5, max_tokens=1000, json_mode=False):
 
 
 def _vision_once(image_b64: str, prompt: str, max_tokens: int = 2000) -> str:
-    client = _get_client()
+    client = _get_anthropic_client()
     try:
         response = client.messages.create(
-            model=_model(),
+            model=_anthropic_model(),
             max_tokens=max_tokens,
             messages=[{
                 'role': 'user',

@@ -58,7 +58,9 @@ end to end:
 - **Backend:** Django 5.1, SQLite (or any `DATABASE_URL` via `dj-database-url`)
 - **Frontend:** Django templates + HTMX + Bootstrap 5 + vanilla JS (no SPA
   framework)
-- **AI:** Anthropic Claude (`anthropic` SDK)
+- **AI:** Qwen (via an OpenAI-compatible API) for notes, questions, grading,
+  hints, and tutor chat; Anthropic Claude for scanned-page math OCR/vision
+  transcription
 - **Audio:** gTTS for generated audio summaries
 - **Static files:** WhiteNoise
 
@@ -71,7 +73,7 @@ python -m venv .venv
 
 pip install -r requirements.txt
 
-cp .env.example .env          # fill in SECRET_KEY, ANTHROPIC_API_KEY, etc.
+cp .env.example .env          # fill in SECRET_KEY, QWEN_API_KEY, etc.
 
 python manage.py migrate
 python manage.py runserver
@@ -94,9 +96,11 @@ time, so one visitor poking around doesn't spoil it for the next).
 ## Environment variables
 
 See `.env.example` for the full list. At minimum you need `SECRET_KEY` and
-`ANTHROPIC_API_KEY` to use the AI features. `EMAIL_BACKEND` defaults to Django's
-console backend, so password-reset emails print to the `runserver` log instead of
-sending real mail — fine for local dev, swap in a real backend for production.
+`QWEN_API_KEY` to use the AI features; `ANTHROPIC_API_KEY` is optional and only
+needed for scanned-page math OCR (falls back to Tesseract without it).
+`EMAIL_BACKEND` defaults to Django's console backend, so password-reset emails
+print to the `runserver` log instead of sending real mail — fine for local dev,
+swap in a real backend for production.
 
 ## Running tests
 

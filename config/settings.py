@@ -131,12 +131,19 @@ SESSION_COOKIE_AGE = 86400 * 30  # 30 days
 MAX_PDF_SIZE_MB = config('MAX_PDF_SIZE_MB', default=50, cast=int)
 MAX_UPLOAD_MB = config('MAX_UPLOAD_MB', default=MAX_PDF_SIZE_MB, cast=int)
 
-# Claude/Anthropic AI provider
-AI_PROVIDER = 'anthropic'
+# AI providers: Qwen powers all text generation (notes, questions, grading,
+# hints, tutor chat); Anthropic Claude is kept as a separate pathway used only
+# for scanned-page math OCR/vision transcription.
+AI_PROVIDER = 'qwen'
 AI_REQUEST_TIMEOUT = config('AI_REQUEST_TIMEOUT', default=120, cast=float)
 AI_MAX_RETRIES = config('AI_MAX_RETRIES', default=3, cast=int)
 
-# Anthropic settings
+# Qwen settings (primary text AI provider)
+QWEN_API_KEY = config('QWEN_API_KEY', default='')
+QWEN_MODEL_ID = config('QWEN_MODEL_ID', default='Qwen-Ambassador/Qwen3.8-Max')
+QWEN_BASE_URL = config('QWEN_BASE_URL', default='https://api-inference.modelscope.ai/v1')
+
+# Anthropic settings (math OCR/vision transcription only)
 ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default='')
 ANTHROPIC_MODEL_ID = config('ANTHROPIC_MODEL_ID', default='claude-sonnet-5')
 ANTHROPIC_BASE_URL = config('ANTHROPIC_BASE_URL', default='https://api.anthropic.com')

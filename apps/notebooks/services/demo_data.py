@@ -2,7 +2,7 @@
 visitor can explore the whole app without uploading their own PDF first.
 
 Deliberately has zero AI calls - everything here is hardcoded so it's instant
-and works even if ANTHROPIC_API_KEY isn't configured. Structured-question
+and works even if QWEN_API_KEY isn't configured. Structured-question
 answers are graded through the real `grading` module (not hardcoded grade
 strings) so if a visitor clicks "Grade All" again, the result stays consistent.
 """

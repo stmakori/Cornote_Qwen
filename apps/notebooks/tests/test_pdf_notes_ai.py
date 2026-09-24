@@ -128,46 +128,40 @@ class AIServiceMockedTests(TestCase):
         prompt = mock_chat.call_args.args[0][0]['content']
         self.assertIn('exactly 7 questions', prompt)
 
-    @patch('apps.notebooks.services.ai_service.Anthropic')
-    def test_get_client_uses_anthropic_auth_token(self, mock_anthropic):
+    @patch('apps.notebooks.services.ai_service.OpenAI')
+    def test_get_qwen_client_uses_api_key_and_base_url(self, mock_openai):
         with override_settings(
-            ANTHROPIC_API_KEY='test-api-key',
-            ANTHROPIC_BASE_URL='https://aws-external-anthropic.us-east-2.api.aws',
-            ANTHROPIC_WORKSPACE_ID='workspace-123',
+            QWEN_API_KEY='test-qwen-key',
+            QWEN_BASE_URL='https://api-inference.modelscope.ai/v1',
         ):
-            ai_service._get_client()
+            ai_service._get_qwen_client()
 
-        mock_anthropic.assert_called_once()
-        kwargs = mock_anthropic.call_args.kwargs
-        self.assertEqual(kwargs['api_key'].__class__.__name__, 'Omit')
-        self.assertEqual(kwargs['auth_token'], 'test-api-key')
-        self.assertEqual(kwargs['base_url'], 'https://aws-external-anthropic.us-east-2.api.aws')
-        self.assertEqual(kwargs['default_headers']['anthropic-workspace-id'], 'workspace-123')
+        mock_openai.assert_called_once()
+        kwargs = mock_openai.call_args.kwargs
+        self.assertEqual(kwargs['api_key'], 'test-qwen-key')
+        self.assertEqual(kwargs['base_url'], 'https://api-inference.modelscope.ai/v1')
 
-    @patch('apps.notebooks.services.ai_service.Anthropic')
-    def test_chat_once_uses_auth_token_and_workspace_header(self, mock_anthropic):
-        response = mock_anthropic.return_value.messages.create.return_value
-        response.content = [type('Block', (), {'type': 'text', 'text': 'pong'})()]
+    @patch('apps.notebooks.services.ai_service.OpenAI')
+    def test_chat_once_uses_qwen_model_and_returns_content(self, mock_openai):
+        response = mock_openai.return_value.chat.completions.create.return_value
+        response.choices = [type('Choice', (), {'message': type('Msg', (), {'content': 'pong'})()})()]
 
         with override_settings(
-            ANTHROPIC_BASE_URL='https://aws-external-anthropic.us-east-2.api.aws',
-            ANTHROPIC_WORKSPACE_ID='workspace-123',
-            ANTHROPIC_MODEL_ID='claude-sonnet-4-20250514',
-            ANTHROPIC_API_KEY='test-api-key',
+            QWEN_BASE_URL='https://api-inference.modelscope.ai/v1',
+            QWEN_MODEL_ID='Qwen-Ambassador/Qwen3.8-Max',
+            QWEN_API_KEY='test-qwen-key',
         ):
             content = ai_service._chat_once([{'role': 'user', 'content': 'Hello'}], max_tokens=10)
 
         self.assertEqual(content, 'pong')
-        mock_anthropic.assert_called_once()
-        kwargs = mock_anthropic.call_args.kwargs
-        self.assertEqual(kwargs['base_url'], 'https://aws-external-anthropic.us-east-2.api.aws')
-        self.assertEqual(kwargs['default_headers']['anthropic-workspace-id'], 'workspace-123')
-        self.assertEqual(kwargs['auth_token'], 'test-api-key')
-        mock_anthropic.return_value.messages.create.assert_called_once()
-        called_kwargs = mock_anthropic.return_value.messages.create.call_args.kwargs
-        self.assertEqual(called_kwargs['model'], 'claude-sonnet-4-20250514')
+        mock_openai.assert_called_once()
+        kwargs = mock_openai.call_args.kwargs
+        self.assertEqual(kwargs['base_url'], 'https://api-inference.modelscope.ai/v1')
+        self.assertEqual(kwargs['api_key'], 'test-qwen-key')
+        mock_openai.return_value.chat.completions.create.assert_called_once()
+        called_kwargs = mock_openai.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(called_kwargs['model'], 'Qwen-Ambassador/Qwen3.8-Max')
         self.assertEqual(called_kwargs['max_tokens'], 10)
-        self.assertNotIn('extra_headers', called_kwargs)
 
     @patch('apps.notebooks.services.ai_service.gTTS')
     def test_generate_audio_summary_uses_gtts_fallback(self, mock_gtts):
