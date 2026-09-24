@@ -35,14 +35,29 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 
 
 def _ocr_page(page) -> str:
-    """Run OCR on a single pdfplumber page. Returns empty string if unavailable."""
+    """OCR a single scanned page.
+
+    Tries Claude's vision first: Tesseract has no concept of LaTeX and mangles
+    math notation (fractions, exponents, roots) into unreadable plain text,
+    while Claude can read the page and transcribe math as LaTeX. Falls back
+    to Tesseract (works offline, no API key needed) if that's unavailable.
+    """
+    try:
+        img = page.to_image(resolution=200).original
+    except Exception:
+        return ''
+
+    try:
+        from . import ai_service
+        text = ai_service.transcribe_scanned_page_image(img)
+        if text:
+            return text
+    except Exception:
+        pass
+
     try:
         import pytesseract
-        from PIL import Image
-        import io
-        img = page.to_image(resolution=200).original
-        text = pytesseract.image_to_string(img)
-        return text.strip()
+        return pytesseract.image_to_string(img).strip()
     except ImportError:
         return ''
     except Exception:

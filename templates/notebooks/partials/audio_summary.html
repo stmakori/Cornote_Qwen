@@ -1,21 +1,26 @@
 {% if success %}
-  <div class="alert alert-success alert-dismissible fade show" role="alert">
+  <div class="alert audio-note success alert-dismissible fade show" role="alert">
     <i class="bi bi-check-circle me-2"></i>{{ message }}
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>
-  <div class="mt-3">
-    <audio controls style="width: 100%; height: 40px; border-radius: 6px;">
+  <div class="audio-frame mt-3">
+    <div class="audio-frame-head">
+      <span class="audio-frame-title"><i class="bi bi-soundwave"></i>Audio Summary</span>
+      <span class="audio-frame-status"><i class="bi bi-check-circle me-1 text-success-edu"></i>Ready</span>
+    </div>
+    <audio controls preload="auto">
       <source src="{{ audio_url }}" type="audio/mpeg">
       Your browser does not support the audio element.
     </audio>
-    <div class="mt-2">
-      <a href="{{ audio_url }}" download class="btn btn-sm btn-outline-primary">
+    <div class="audio-frame-foot">
+      <span class="audio-frame-status">Listen while you review your notes</span>
+      <a href="{{ audio_url }}" download class="btn btn-sm btn-soft">
         <i class="bi bi-download me-1"></i>Download MP3
       </a>
     </div>
   </div>
 {% else %}
-  <div class="alert alert-danger alert-dismissible fade show" role="alert">
+  <div class="alert audio-note danger alert-dismissible fade show" role="alert">
     <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
   </div>

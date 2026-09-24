@@ -346,20 +346,28 @@ class ExamService:
     
     @staticmethod
     def finalize_exam_session(exam_session):
-        """Calculate final score and complete exam"""
+        """Calculate final score and complete exam.
+
+        Divides by `total_questions` (captured when the exam started), not
+        `answers.count()` - a question the student never touched at all never
+        gets an Answer linked to this exam_session, so counting only linked
+        answers silently drops skipped questions from the denominator instead
+        of counting them as wrong, inflating the score (verified: 2/3 correct
+        with 1 skipped entirely used to report 100% instead of 66.7%).
+        """
         answers = exam_session.answers.all()
-        
+
         exam_session.correct_answers = answers.filter(grade='correct').count()
         exam_session.partial_answers = answers.filter(grade='partial').count()
-        
-        if answers.exists():
+
+        if exam_session.total_questions > 0:
             correct_score = exam_session.correct_answers + (exam_session.partial_answers * 0.5)
-            exam_session.score_percentage = (correct_score / answers.count()) * 100
-        
+            exam_session.score_percentage = (correct_score / exam_session.total_questions) * 100
+
         exam_session.is_completed = True
         exam_session.ended_at = timezone.now()
         exam_session.save()
-        
+
         return exam_session
     
     @staticmethod
@@ -395,25 +403,98 @@ class ExamService:
 
 
 # ════════════════════════════════════════════════════════════
+# FEATURE 11: TEACHER/CLASS STATISTICS
+# ════════════════════════════════════════════════════════════
+
+class ClassStatsService:
+    """Compute and persist ClassStatistics from real AssignmentSubmission grades.
+
+    ClassStatistics existed on the model (and in the admin) but nothing ever
+    computed or saved one - this is what actually populates it, called after
+    a student submits an assignment and whenever a teacher views the class.
+    """
+
+    @staticmethod
+    def update_class_statistics(student_class):
+        from ..models import AssignmentSubmission, ClassStatistics
+
+        stats, _ = ClassStatistics.objects.get_or_create(student_class=student_class)
+        stats.total_students = student_class.students.count()
+
+        graded = AssignmentSubmission.objects.filter(
+            assignment__student_class=student_class,
+        ).exclude(grade=Answer.GRADE_UNGRADED)
+
+        if graded.exists():
+            correct = graded.filter(grade=Answer.GRADE_CORRECT).count()
+            partial = graded.filter(grade=Answer.GRADE_PARTIAL).count()
+            total = graded.count()
+            stats.average_accuracy = round(((correct + partial * 0.5) / total) * 100, 1)
+
+            # Hardest questions: lowest per-question accuracy, worst first.
+            per_question = (
+                graded.values('question_id', 'question__question_text')
+                .annotate(
+                    total=Count('id'),
+                    correct=Count('id', filter=Q(grade=Answer.GRADE_CORRECT)),
+                )
+            )
+            ranked = sorted(per_question, key=lambda row: row['correct'] / row['total'])
+            stats.most_difficult_topics = [row['question__question_text'][:80] for row in ranked[:5]]
+        else:
+            stats.average_accuracy = 0.0
+            stats.most_difficult_topics = []
+
+        stats.save()
+        return stats
+
+
+# ════════════════════════════════════════════════════════════
 # FEATURE 13: LEARNING PATH GENERATOR
 # ════════════════════════════════════════════════════════════
 
 class LearningPathService:
-    """Generate and manage learning paths"""
-    
+    """Generate and manage learning paths.
+
+    Topic previously had no code path that ever created one anywhere in the
+    app - this service read Topic.objects.filter(notebook=notebook) but
+    nothing populated it, so a "learning path" was always empty. This now
+    has the AI extract a topic sequence from the notebook's material the
+    first time a path is requested.
+    """
+
     @staticmethod
     def generate_learning_path(notebook):
-        """Generate optimal learning path using topological sort"""
-        topics = Topic.objects.filter(notebook=notebook).order_by('difficulty_level', 'order_index')
-        
-        # Simple ordering: easy → medium → hard
-        path = list(topics.values_list('id', flat=True))
-        
-        learning_path, created = LearningPath.objects.get_or_create(notebook=notebook)
-        learning_path.topic_sequence = path
+        """Build (or rebuild) the topic sequence for a notebook, extracting
+        topics from its material via AI if none exist yet."""
+        topics = list(Topic.objects.filter(notebook=notebook).order_by('order_index'))
+
+        if not topics:
+            from . import ai_service
+            source_text = (notebook.pdf_text or notebook.notes_content or '').strip()
+            if source_text:
+                extracted = ai_service.extract_topics(source_text)
+                created_topics = []
+                for idx, t in enumerate(extracted):
+                    created_topics.append(Topic.objects.create(
+                        notebook=notebook,
+                        name=t['name'],
+                        description=t.get('description', ''),
+                        difficulty_level=t.get('difficulty_level', 2),
+                        order_index=idx,
+                    ))
+                # Simple linear chain: each topic depends on the one before it,
+                # matching the AI's suggested study order.
+                for i in range(1, len(created_topics)):
+                    created_topics[i].prerequisites.add(created_topics[i - 1])
+                topics = created_topics
+
+        learning_path, _ = LearningPath.objects.get_or_create(notebook=notebook)
+        learning_path.topic_sequence = [t.pk for t in topics]
         learning_path.current_topic_index = 0
+        learning_path.completed_topics = []
         learning_path.save()
-        
+
         return learning_path
     
     @staticmethod
@@ -435,6 +516,18 @@ class LearningPathService:
         if learning_path.current_topic_index >= len(learning_path.topic_sequence):
             learning_path.current_topic_index = len(learning_path.topic_sequence) - 1
         learning_path.save()
+
+    @staticmethod
+    def mark_current_topic_complete(learning_path):
+        """Mark the current topic done and move to the next one (or stay put,
+        with nothing left to advance to, if it was the last topic)."""
+        current = LearningPathService.get_current_topic(learning_path)
+        if current and current.pk not in learning_path.completed_topics:
+            learning_path.completed_topics = learning_path.completed_topics + [current.pk]
+            learning_path.save(update_fields=['completed_topics'])
+        if learning_path.current_topic_index < len(learning_path.topic_sequence) - 1:
+            LearningPathService.advance_topic(learning_path)
+        return learning_path
 
 
 # ════════════════════════════════════════════════════════════

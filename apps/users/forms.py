@@ -1,5 +1,7 @@
 from django import forms
-from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
+from django.contrib.auth.forms import (
+    UserCreationForm, AuthenticationForm, PasswordResetForm, SetPasswordForm,
+)
 from django.contrib.auth.models import User
 
 
@@ -7,6 +9,7 @@ class RegisterForm(UserCreationForm):
     email = forms.EmailField(required=True, widget=forms.EmailInput(attrs={
         'class': 'form-control',
         'placeholder': 'your@email.com',
+        'autocomplete': 'email',
     }))
 
     class Meta:
@@ -34,6 +37,29 @@ class LoginForm(AuthenticationForm):
         super().__init__(*args, **kwargs)
         self.fields['username'].widget.attrs.update({'class': 'form-control', 'placeholder': 'Username'})
         self.fields['password'].widget.attrs.update({'class': 'form-control', 'placeholder': 'Password'})
+
+
+class StyledPasswordResetForm(PasswordResetForm):
+    """Django's built-in PasswordResetForm renders a bare <input> with no CSS
+    class, which shows up as an unstyled browser-default box on the dark
+    theme. This just adds the app's form-control styling."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['email'].widget.attrs.update({
+            'class': 'form-control', 'placeholder': 'your@email.com',
+        })
+
+
+class StyledSetPasswordForm(SetPasswordForm):
+    """Same as above, for the "set a new password" step of the reset flow."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['new_password1'].widget.attrs.update({
+            'class': 'form-control', 'placeholder': 'New password',
+        })
+        self.fields['new_password2'].widget.attrs.update({
+            'class': 'form-control', 'placeholder': 'Confirm new password',
+        })
 
 
 class TimerPreferencesForm(forms.Form):

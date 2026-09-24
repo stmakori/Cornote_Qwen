@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% block title %}{{ assignment.title }} | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:820px;margin:0 auto;">
+
+  <div class="d-flex align-items-start justify-content-between mb-4 flex-wrap gap-3">
+    <div>
+      <a href="{% url 'notebooks:teacher_class_detail' assignment.student_class_id %}" class="btn btn-ghost btn-sm p-1 mb-2">
+        <i class="bi bi-arrow-left me-1"></i>{{ assignment.student_class.name }}
+      </a>
+      <h1 class="h4 fw-bold mb-1">{{ assignment.title }}</h1>
+      {% if assignment.description %}<p class="text-muted small mb-1">{{ assignment.description }}</p>{% endif %}
+      <p class="text-muted small mb-0"><i class="bi bi-calendar3 me-1"></i>Due {{ assignment.due_date|date:"M j, Y H:i" }}</p>
+    </div>
+  </div>
+
+  {% if all_graded %}
+  <div class="cornote-card p-3 mb-4 d-flex align-items-center gap-2" style="border-left:3px solid var(--success);">
+    <i class="bi bi-check-circle-fill text-success"></i>
+    <span class="small">You've submitted this assignment. You can still change an answer and resubmit.</span>
+  </div>
+  {% endif %}
+
+  {% for question, submission in question_submissions %}
+  <div class="cornote-card p-4 mb-3">
+    <span class="question-number d-block mb-2">Q{{ forloop.counter }}</span>
+    <p class="question-text">{{ question.question_text }}</p>
+
+    {% url 'notebooks:save_assignment_answer' assignment.pk question.pk as question_save_url %}
+    {% include 'notebooks/partials/_answer_widget.html' with question=question answer=submission readonly=False autosave=True show_hint=False id_prefix='asg' save_url=question_save_url %}
+
+    <span id="save-ind-{{ question.pk }}" class="save-indicator d-block mt-1"></span>
+
+    {% if submission.grade != 'ungraded' %}
+    <div class="mt-2">
+      <span class="badge grade-badge badge-{{ submission.grade }}">
+        {% if submission.grade == 'correct' %}<i class="bi bi-check-circle me-1"></i>Correct
+        {% elif submission.grade == 'partial' %}<i class="bi bi-dash-circle me-1"></i>Partial
+        {% else %}<i class="bi bi-x-circle me-1"></i>Incorrect{% endif %}
+      </span>
+    </div>
+    {% if submission.feedback %}
+    <div class="feedback-bubble mt-2"><i class="bi bi-chat-left-text me-1"></i>{{ submission.feedback }}</div>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% empty %}
+  <div class="cornote-card p-4 text-center text-muted">
+    <i class="bi bi-journal display-6 d-block mb-2"></i>
+    <p class="small mb-0">This assignment has no questions attached yet.</p>
+  </div>
+  {% endfor %}
+
+  {% if question_submissions %}
+  <form method="post" action="{% url 'notebooks:submit_assignment' assignment.pk %}">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-accent w-100">
+      <i class="bi bi-check2-all me-2"></i>{% if all_graded %}Resubmit{% else %}Submit Assignment{% endif %}
+    </button>
+  </form>
+  {% endif %}
+</div>
+
+<script src="/static/js/question-widgets.js"></script>
+{% endblock %}

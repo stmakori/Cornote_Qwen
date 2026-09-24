@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% block title %}Leaderboard | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:900px;margin:0 auto;">
+
+  <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
+    <div>
+      <h1 class="h4 fw-bold mb-0"><i class="bi bi-bar-chart-steps me-2 text-accent"></i>Leaderboard</h1>
+      <p class="text-muted small mb-0">Ranked by answer accuracy across all graded questions (min {{ min_answered }} answered)</p>
+    </div>
+    <a href="{% url 'notebooks:dashboard' %}" class="btn btn-ghost btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>Back to Notebooks
+    </a>
+  </div>
+
+  {% if my_row %}
+  <div class="cornote-card p-3 mb-3 d-flex align-items-center justify-content-between"
+       style="border-color:var(--accent) !important;box-shadow:0 0 0 1px var(--accent), 0 0 18px -6px var(--accent-glow);">
+    <div class="small">Your rank: <strong>#{{ my_row.rank }}</strong> · {{ my_row.accuracy }}% accuracy · {{ my_row.badge_count }} badge{{ my_row.badge_count|pluralize }}</div>
+  </div>
+  {% endif %}
+
+  <div class="cornote-card p-0 mb-4">
+    {% if not rows %}
+    <div class="p-4 text-center text-muted small">
+      No one has answered enough questions yet ({{ min_answered }}+ needed) to appear on the leaderboard.
+    </div>
+    {% else %}
+    <div class="table-responsive">
+      <table class="table table-borderless mb-0">
+        <thead>
+          <tr class="text-muted small">
+            <th class="ps-3">Rank</th>
+            <th>Student</th>
+            <th>Accuracy</th>
+            <th>Answered</th>
+            <th class="pe-3">Badges</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr{% if row.is_me %} style="background:var(--bg-elevated);"{% endif %}>
+            <td class="ps-3 fw-semibold">
+              {% if row.rank == 1 %}<i class="bi bi-trophy-fill" style="color:#fbbf24;"></i>
+              {% elif row.rank == 2 %}<i class="bi bi-trophy-fill" style="color:#d1d5db;"></i>
+              {% elif row.rank == 3 %}<i class="bi bi-trophy-fill" style="color:#c2833f;"></i>
+              {% else %}#{{ row.rank }}{% endif %}
+            </td>
+            <td>{{ row.user.username }}{% if row.is_me %} <span class="badge bg-accent">you</span>{% endif %}</td>
+            <td>{{ row.accuracy }}%</td>
+            <td>{{ row.total_answered }}</td>
+            <td class="pe-3"><i class="bi bi-award me-1 text-accent"></i>{{ row.badge_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
+  {% for gl in group_leaderboards %}
+  <div class="cornote-card p-3 mb-3">
+    <h2 class="h6 fw-semibold mb-3"><i class="bi bi-people me-2 text-accent"></i>{{ gl.group.name }}</h2>
+    <div class="table-responsive">
+      <table class="table table-borderless table-sm mb-0">
+        <tbody>
+          {% for row in gl.rows %}
+          <tr{% if row.is_me %} style="background:var(--bg-elevated);"{% endif %}>
+            <td class="ps-2" style="width:2.5rem;">#{{ row.rank }}</td>
+            <td>{{ row.user.username }}{% if row.is_me %} <span class="badge bg-accent">you</span>{% endif %}</td>
+            <td class="text-end pe-2">{{ row.accuracy }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+
+</div>
+{% endblock %}

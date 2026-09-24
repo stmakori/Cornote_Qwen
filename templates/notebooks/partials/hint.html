@@ -1,0 +1,22 @@
+{% if error %}
+<div class="hint-panel hint-panel-error">
+  <i class="bi bi-exclamation-triangle me-1"></i>{{ error }}
+</div>
+{% else %}
+<div class="hint-panel">
+  <div class="hint-panel-label">
+    <i class="bi bi-lightbulb-fill me-1"></i>Hint {{ level }}<span class="text-muted">/2</span>
+  </div>
+  <p class="hint-panel-text mb-0">{{ hint_text }}</p>
+</div>
+{% if level == 1 %}
+<button type="button"
+        class="hint-btn hint-btn-more"
+        hx-post="{% url 'notebooks:get_hint' question.pk %}"
+        hx-vals='{"level": 2}'
+        hx-target="closest .hint-wrap"
+        hx-swap="innerHTML">
+  <i class="bi bi-lightbulb me-1"></i>Reveal a bigger hint
+</button>
+{% endif %}
+{% endif %}

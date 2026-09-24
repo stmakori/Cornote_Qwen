@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+{% block title %}Learning Path | {{ notebook.title }} | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:720px;margin:0 auto;">
+
+  <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
+    <div>
+      <a href="{% url 'notebooks:detail' notebook.pk %}" class="btn btn-ghost btn-sm p-1 mb-2">
+        <i class="bi bi-arrow-left me-1"></i>{{ notebook.title }}
+      </a>
+      <h1 class="h4 fw-bold mb-0"><i class="bi bi-signpost-split me-2 text-accent"></i>Learning Path</h1>
+      <p class="text-muted small mb-0">A suggested order to study this material in, easiest ideas first.</p>
+    </div>
+  </div>
+
+  {% if not path or not topics %}
+  <div class="cornote-card p-4 text-center">
+    <i class="bi bi-signpost display-4 text-accent mb-3 d-block"></i>
+    <h2 class="h6 fw-semibold mb-2">No learning path yet</h2>
+    <p class="text-muted small mb-3">
+      Generate one and the AI will break this notebook's material into an ordered sequence
+      of topics - foundational ideas first, things that build on them later.
+    </p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="generate">
+      <button type="submit" class="btn btn-accent">
+        <i class="bi bi-stars me-2"></i>Generate Learning Path
+      </button>
+    </form>
+  </div>
+  {% else %}
+
+  <div class="cornote-card p-3 mb-3 d-flex align-items-center justify-content-between">
+    <div class="small text-muted">
+      Topic {{ path.current_topic_index|add:1 }} of {{ topics|length }}
+      · {{ path.completed_topics|length }} completed
+    </div>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="generate">
+      <button type="submit" class="btn btn-ghost btn-sm" title="Regenerate from scratch">
+        <i class="bi bi-arrow-clockwise me-1"></i>Regenerate
+      </button>
+    </form>
+  </div>
+
+  {% for topic in topics %}
+  <div class="cornote-card p-4 mb-3{% if topic.pk == current_topic.pk %} border-accent{% endif %}"
+       style="{% if topic.pk == current_topic.pk %}border-color:var(--accent) !important;box-shadow:0 0 0 1px var(--accent), 0 0 18px -6px var(--accent-glow);{% endif %}">
+    <div class="d-flex align-items-start justify-content-between gap-3">
+      <div class="d-flex align-items-start gap-3">
+        <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
+             style="width:32px;height:32px;font-size:.8rem;font-weight:700;
+                    {% if topic.pk in path.completed_topics %}background:var(--success);color:#fff;
+                    {% elif topic.pk == current_topic.pk %}background:var(--accent);color:#fff;
+                    {% else %}background:var(--bg-elevated);color:var(--text-muted);{% endif %}">
+          {% if topic.pk in path.completed_topics %}<i class="bi bi-check-lg"></i>{% else %}{{ forloop.counter }}{% endif %}
+        </div>
+        <div>
+          <div class="fw-semibold">{{ topic.name }}</div>
+          {% if topic.description %}<p class="text-muted small mb-1">{{ topic.description }}</p>{% endif %}
+          <span class="badge" style="background:var(--bg-elevated);font-size:.65rem;">
+            {% if topic.difficulty_level == 1 %}Easy{% elif topic.difficulty_level == 3 %}Hard{% else %}Medium{% endif %}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    {% if topic.pk == current_topic.pk and topic.pk not in path.completed_topics %}
+    <form method="post" class="mt-3">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="mark_complete">
+      <button type="submit" class="btn btn-accent btn-sm">
+        <i class="bi bi-check2-circle me-1"></i>Mark complete & continue
+      </button>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if path.completed_topics|length == topics|length %}
+  <div class="cornote-card p-4 text-center" style="border-color:var(--success) !important;">
+    <i class="bi bi-trophy-fill display-5 text-success mb-2 d-block"></i>
+    <p class="fw-semibold mb-0">You've completed every topic in this path!</p>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Ask AI Tutor | {{ notebook.title }} | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:760px;margin:0 auto;">
+
+  <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-3">
+    <div>
+      <a href="{% url 'notebooks:detail' notebook.pk %}" class="btn btn-ghost btn-sm p-1 mb-2">
+        <i class="bi bi-arrow-left me-1"></i>{{ notebook.title }}
+      </a>
+      <h1 class="h4 fw-bold mb-0"><i class="bi bi-chat-dots me-2 text-accent"></i>Ask AI Tutor</h1>
+      <p class="text-muted small mb-0">Ask anything about this notebook's material - answers are grounded in it.</p>
+    </div>
+  </div>
+
+  <div class="cornote-card p-3">
+    <div id="chat-messages" class="mb-3 d-flex flex-column gap-2" style="max-height:60vh;overflow-y:auto;">
+      {% if not chat_messages %}
+      <div class="text-muted small text-center py-4">
+        <i class="bi bi-stars d-block fs-3 mb-2 text-accent"></i>
+        Ask a question about "{{ notebook.title }}" to get started.
+      </div>
+      {% endif %}
+      {% for message in chat_messages %}
+      {% include 'notebooks/partials/chat_message_bubble.html' with message=message %}
+      {% endfor %}
+    </div>
+
+    <form hx-post="{% url 'notebooks:notebook_chat' notebook.pk %}"
+          hx-target="#chat-messages" hx-swap="beforeend"
+          hx-disabled-elt="#chat-input, #chat-send-btn"
+          hx-on::before-request="document.getElementById('chat-send-icon').classList.add('d-none'); document.getElementById('chat-send-spinner').classList.remove('d-none');"
+          hx-on::after-request="document.getElementById('chat-send-icon').classList.remove('d-none'); document.getElementById('chat-send-spinner').classList.add('d-none'); if(event.detail.successful){this.reset(); const c=document.getElementById('chat-messages'); c.scrollTop=c.scrollHeight;}"
+          class="d-flex gap-2">
+      {% csrf_token %}
+      <input type="text" id="chat-input" name="message" class="form-control" placeholder="Ask a question about this material..."
+             required maxlength="1000" autocomplete="off">
+      <button type="submit" id="chat-send-btn" class="btn btn-accent">
+        <i class="bi bi-send" id="chat-send-icon"></i>
+        <span class="spinner-border spinner-border-sm d-none" id="chat-send-spinner" role="status" aria-hidden="true"></span>
+      </button>
+    </form>
+  </div>
+
+</div>
+{% endblock %}

@@ -15,6 +15,14 @@
   <style>
     html { scroll-behavior: smooth; }
     body { overflow-x: hidden; }
+    /* Phone widths: the 3.5rem hero title wraps to 3-4 lines and the three
+       px-5 buttons stack awkwardly; tighten type and make CTAs full-width. */
+    @media (max-width: 576px) {
+      .hero-title { font-size: 2.4rem; }
+      .hero-subtitle { font-size: 1.05rem; }
+      .hero-buttons form,
+      .hero-buttons .btn { width: 100%; }
+    }
   </style>
 </head>
 <body class="cornote-body">
@@ -25,7 +33,8 @@
       <a class="navbar-brand fw-bold" href="#home">
         <i class="bi bi-journal-bookmark-fill text-primary-edu me-2"></i>Cornote
       </a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"
+              aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="navbarNav">
@@ -79,6 +88,12 @@
         <a href="{% url 'users:login' %}" class="btn btn-lg btn-outline-primary px-5 fw-semibold">
           Sign In
         </a>
+        <form method="post" action="{% url 'users:demo_login' %}" class="d-inline">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-lg btn-outline-primary px-5 fw-semibold">
+            <i class="bi bi-play-circle me-2"></i>Try Demo
+          </button>
+        </form>
         {% else %}
         <a href="{% url 'notebooks:dashboard' %}" class="btn btn-lg btn-primary-edu px-5 fw-semibold">
           <i class="bi bi-grid-3x3-gap me-2"></i>Go to Dashboard
@@ -270,18 +285,17 @@
           </ul>
         </div>
         <div class="col-md-4">
-          <h5 class="fw-bold mb-2">Connect</h5>
-          <div class="d-flex gap-2">
-            <a href="#" class="text-muted text-decoration-none hover:text-primary" title="Twitter">
-              <i class="bi bi-twitter"></i>
-            </a>
-            <a href="#" class="text-muted text-decoration-none hover:text-primary" title="GitHub">
-              <i class="bi bi-github"></i>
-            </a>
-            <a href="#" class="text-muted text-decoration-none hover:text-primary" title="Email">
-              <i class="bi bi-envelope"></i>
-            </a>
-          </div>
+          <h5 class="fw-bold mb-2">Account</h5>
+          <ul class="list-unstyled small">
+            {% if user.is_authenticated %}
+            <li><a href="{% url 'notebooks:upload' %}" class="text-muted text-decoration-none">Upload document</a></li>
+            <li><a href="{% url 'users:profile' %}" class="text-muted text-decoration-none">Timer Settings</a></li>
+            {% else %}
+            <li><a href="{% url 'users:login' %}" class="text-muted text-decoration-none">Sign In</a></li>
+            <li><a href="{% url 'users:register' %}" class="text-muted text-decoration-none">Create account</a></li>
+            <li><a href="{% url 'users:password_reset' %}" class="text-muted text-decoration-none">Forgot password</a></li>
+            {% endif %}
+          </ul>
         </div>
       </div>
       <hr class="border-subtle">
@@ -295,9 +309,13 @@
     // Smooth scroll for anchor links
     document.querySelectorAll('a[href^="#"]').forEach(anchor => {
       anchor.addEventListener('click', function (e) {
-        e.preventDefault();
-        const target = document.querySelector(this.getAttribute('href'));
+        const href = this.getAttribute('href');
+        // A bare "#" (or a hash with no matching section) isn't a valid
+        // selector; querySelector('#') throws, so bail out before that.
+        if (!href || href.length < 2) return;
+        const target = document.getElementById(href.slice(1));
         if (target) {
+          e.preventDefault();
           target.scrollIntoView({ behavior: 'smooth' });
         }
       });

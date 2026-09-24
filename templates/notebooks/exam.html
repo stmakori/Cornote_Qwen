@@ -66,13 +66,7 @@
         </div>
         <div class="question-content">
           <p class="question-text">{{ q.question_text }}</p>
-          <textarea
-            class="form-control exam-answer"
-            id="ans-{{ q.id }}"
-            rows="4"
-            placeholder="Type your answer here…"
-            oninput="markAnswered({{ q.id }})"
-          ></textarea>
+          {% include 'notebooks/partials/_answer_widget.html' with question=q answer=None readonly=False id_prefix='ans' autosave=False show_hint=False extra_input_class='exam-answer' %}
           <div class="question-footer">
             <span class="answered-indicator d-none" id="badge-{{ q.id }}">
               <i class="bi bi-check-circle-fill me-1"></i><span class="d-none d-sm-inline">Answered</span>
@@ -158,12 +152,12 @@ function markAnswered(qid) {
 }
 
 function updateProgress() {
-  const answered = document.querySelectorAll('.answered-badge:not(.d-none)').length;
+  const answered = document.querySelectorAll('.answered-indicator:not(.d-none)').length;
   document.getElementById('progress-label').textContent = `${answered} / ${TOTAL_QUESTIONS}`;
 }
 
 function confirmSubmit() {
-  const answered = document.querySelectorAll('.answered-badge:not(.d-none)').length;
+  const answered = document.querySelectorAll('.answered-indicator:not(.d-none)').length;
   const unanswered = TOTAL_QUESTIONS - answered;
   if (unanswered > 0) {
     if (!confirm(`You have ${unanswered} unanswered question(s). Submit anyway?`)) return;
@@ -174,10 +168,13 @@ function confirmSubmit() {
 async function submitExam() {
   if (!examId) return;
   clearInterval(timerInterval);
+  // The student already confirmed submission (or time ran out) - don't let
+  // beforeunload nag them again when THIS function redirects to the result page.
+  examStarted = false;
 
   // Collect answers
   const answers = [];
-  document.querySelectorAll('.exam-question').forEach(block => {
+  document.querySelectorAll('.exam-question-card').forEach(block => {
     const qid = block.dataset.qid;
     const val = document.getElementById(`ans-${qid}`).value.trim();
     if (val) answers.push({question_id: qid, answer: val});
@@ -192,7 +189,7 @@ async function submitExam() {
       await fetch(`/notebooks/answer/${question_id}/save/`, {
         method: 'POST',
         headers: {'X-CSRFToken': CSRF, 'Content-Type': 'application/x-www-form-urlencoded'},
-        body: `user_answer=${encodeURIComponent(answer)}`,
+        body: `user_answer=${encodeURIComponent(answer)}&exam_session_id=${examId}`,
       });
     } catch(e) {}
   }
@@ -219,4 +216,5 @@ window.addEventListener('beforeunload', (e) => {
   }
 });
 </script>
+<script src="/static/js/question-widgets.js"></script>
 {% endblock %}

@@ -11,10 +11,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <!-- Custom CSS -->
   <link rel="stylesheet" href="/static/css/cornote.css">
+  <!-- KaTeX: renders LaTeX math (from AI-transcribed scanned notes/questions) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 
   {% block extra_head %}{% endblock %}
 </head>
-<body class="cornote-body">
+<body class="cornote-body{% if reduce_animations %} reduce-animations{% endif %}">
 
   {% if not hide_nav %}
   <nav class="navbar navbar-expand-lg cornote-nav">
@@ -64,6 +66,11 @@
                   </a>
                 </li>
                 <li>
+                  <a class="dropdown-item" href="{% url 'notebooks:leaderboard_page' %}">
+                    <i class="bi bi-bar-chart-steps me-2"></i>Leaderboard
+                  </a>
+                </li>
+                <li>
                   <a class="dropdown-item" href="{% url 'notebooks:teacher_dashboard_page' %}">
                     <i class="bi bi-mortarboard me-2"></i>Teacher / Classes
                   </a>
@@ -78,11 +85,21 @@
               </button>
             </li>
             <!-- Notifications Bell -->
-            <li class="nav-item">
-              <a class="nav-link position-relative" href="#" id="notif-bell" title="Notifications">
+            <li class="nav-item dropdown">
+              <a class="nav-link position-relative dropdown-toggle" href="#" id="notif-bell" title="Notifications"
+                 data-bs-toggle="dropdown" data-bs-auto-close="outside">
                 <i class="bi bi-bell"></i>
                 <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none" id="notif-badge" style="font-size:.6rem;"></span>
               </a>
+              <div class="dropdown-menu dropdown-menu-end p-0 glass" id="notif-dropdown" style="width:340px;max-height:420px;overflow-y:auto;">
+                <div class="d-flex align-items-center justify-content-between px-3 py-2" style="border-bottom:1px solid var(--bg-border);">
+                  <span class="fw-semibold small">Notifications</span>
+                  <button type="button" class="btn btn-link btn-sm p-0 small" id="notif-mark-all-read">Mark all read</button>
+                </div>
+                <div id="notif-list">
+                  <p class="text-muted small text-center py-4 mb-0">Loading…</p>
+                </div>
+              </div>
             </li>
             <li class="nav-item dropdown">
               <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
@@ -140,6 +157,9 @@
     {% block content %}{% endblock %}
   </main>
 
+  <!-- Achievement / celebration toasts (populated by window.cornoteToast in toasts.js) -->
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <!-- HTMX -->
@@ -148,6 +168,26 @@
   <script src="/static/js/accessibility.js"></script>
   <!-- Offline support with service worker -->
   <script src="/static/js/offline-support.js"></script>
+  <!-- Toast helper: window.cornoteToast({title, subtitle, icon, variant}) -->
+  <script src="/static/js/toasts.js"></script>
+  <!-- KaTeX: renders $...$ / $$...$$ LaTeX math wherever it appears in the page -->
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <script>
+    function cornoteRenderMath(root) {
+      if (typeof renderMathInElement !== 'function') return;
+      renderMathInElement(root || document.body, {
+        delimiters: [
+          {left: '$$', right: '$$', display: true},
+          {left: '$', right: '$', display: false},
+        ],
+        throwOnError: false,
+      });
+    }
+    document.addEventListener('DOMContentLoaded', function () { cornoteRenderMath(); });
+    document.body.addEventListener('htmx:afterSwap', function (evt) { cornoteRenderMath(evt.detail.target); });
+    document.body.addEventListener('htmx:oobAfterSwap', function (evt) { cornoteRenderMath(evt.detail.target); });
+  </script>
 
   <script>
     // Send CSRF token with every HTMX request
@@ -204,24 +244,131 @@
 
   {% if user.is_authenticated %}
   <script>
+    function getCsrfToken() {
+      return (document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('csrftoken=')) || '').split('=')[1] || '';
+    }
+
     function refreshNotifBadge() {
       fetch('/notebooks/api/notifications/')
         .then(r => r.json())
         .then(data => {
           const badge = document.getElementById('notif-badge');
-          if (!badge) return;
-          if (data.unread_count > 0) {
-            badge.textContent = data.unread_count;
-            badge.classList.remove('d-none');
-          } else {
-            badge.classList.add('d-none');
+          if (badge) {
+            if (data.unread_count > 0) {
+              badge.textContent = data.unread_count;
+              badge.classList.remove('d-none');
+            } else {
+              badge.classList.add('d-none');
+            }
           }
         })
         .catch(() => {});
     }
+
+    function timeAgo(isoString) {
+      const seconds = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+      if (seconds < 60) return 'just now';
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) return `${minutes}m ago`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours}h ago`;
+      return `${Math.floor(hours / 24)}d ago`;
+    }
+
+    function renderNotifItem(n) {
+      const item = document.createElement('div');
+      item.className = 'px-3 py-2 d-flex gap-2 align-items-start';
+      item.style.borderBottom = '1px solid var(--bg-border)';
+      item.style.cursor = 'pointer';
+      item.style.background = n.is_read ? '' : 'var(--accent-subtle)';
+
+      const icon = document.createElement('i');
+      icon.className = 'bi ' + (n.icon || 'bi-bell') + ' mt-1';
+      icon.style.color = n.color || 'var(--accent)';
+      icon.style.flexShrink = '0';
+
+      const body = document.createElement('div');
+      body.style.minWidth = '0';
+      const title = document.createElement('div');
+      title.className = 'small fw-semibold';
+      title.textContent = n.title;
+      const message = document.createElement('div');
+      message.className = 'text-muted';
+      message.style.fontSize = '.78rem';
+      message.textContent = n.message;
+      const when = document.createElement('div');
+      when.className = 'text-muted';
+      when.style.fontSize = '.68rem';
+      when.textContent = timeAgo(n.created_at);
+      body.appendChild(title);
+      body.appendChild(message);
+      body.appendChild(when);
+
+      item.appendChild(icon);
+      item.appendChild(body);
+
+      if (!n.is_read) {
+        item.addEventListener('click', () => {
+          fetch(`/notebooks/api/notifications/${n.id}/read/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': getCsrfToken() },
+          }).then(() => {
+            item.style.background = '';
+            refreshNotifBadge();
+          }).catch(() => {});
+        }, { once: true });
+      }
+      return item;
+    }
+
+    function loadNotifDropdown() {
+      const list = document.getElementById('notif-list');
+      if (!list) return;
+      fetch('/notebooks/api/notifications/')
+        .then(r => r.json())
+        .then(data => {
+          list.innerHTML = '';
+          if (!data.notifications || data.notifications.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'text-muted small text-center py-4 mb-0';
+            empty.textContent = "You're all caught up.";
+            list.appendChild(empty);
+            return;
+          }
+          data.notifications.forEach(n => list.appendChild(renderNotifItem(n)));
+        })
+        .catch(() => {
+          list.innerHTML = '';
+          const errEl = document.createElement('p');
+          errEl.className = 'text-muted small text-center py-4 mb-0';
+          errEl.textContent = 'Could not load notifications.';
+          list.appendChild(errEl);
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       refreshNotifBadge();
       setInterval(refreshNotifBadge, 60000);
+
+      const bell = document.getElementById('notif-bell');
+      if (bell) bell.addEventListener('show.bs.dropdown', loadNotifDropdown);
+
+      const markAllBtn = document.getElementById('notif-mark-all-read');
+      if (markAllBtn) {
+        markAllBtn.addEventListener('click', () => {
+          fetch('/notebooks/api/notifications/')
+            .then(r => r.json())
+            .then(data => {
+              const unread = (data.notifications || []).filter(n => !n.is_read);
+              return Promise.all(unread.map(n => fetch(`/notebooks/api/notifications/${n.id}/read/`, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': getCsrfToken() },
+              })));
+            })
+            .then(() => { loadNotifDropdown(); refreshNotifBadge(); })
+            .catch(() => {});
+        });
+      }
     });
   </script>
   {% endif %}

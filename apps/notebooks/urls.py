@@ -24,11 +24,21 @@ urlpatterns = [
     path('<int:notebook_id>/exam/', views_features.exam_page, name='exam_page'),
     path('answer/<int:question_pk>/save/', views.save_answer, name='save_answer'),
     path('answer/<int:question_pk>/flag/', views.toggle_flag_question, name='flag_question'),
+    path('answer/<int:question_pk>/hint/', views.get_hint, name='get_hint'),
+    path('<int:pk>/chat/', views.notebook_chat_page, name='notebook_chat_page'),
+    path('<int:pk>/chat/send/', views.notebook_chat, name='notebook_chat'),
     path('<int:pk>/export-anki/', views.export_anki, name='export_anki'),
+
+    # ────────────── SHARING & GATED FILE ACCESS ──────────────
+    path('<int:pk>/pdf-file/', views.serve_notebook_pdf, name='notebook_pdf_file'),
+    path('<int:pk>/audio-file/', views.serve_summary_audio, name='summary_audio_file'),
+    path('<int:pk>/share/', views.toggle_notebook_sharing, name='toggle_sharing'),
+    path('shared/<str:token>/', views.shared_notebook_view, name='shared_notebook'),
 
     # ────────────── FEATURE PAGES (HTML) ──────────────
     path('analytics/', views_features.analytics_page, name='analytics_page'),
     path('achievements/', views_features.achievements_page, name='achievements_page'),
+    path('leaderboard/', views_features.leaderboard_page, name='leaderboard_page'),
     path('preferences/', views_features.preferences_page, name='preferences_page'),
     path('review/', views_features.spaced_review_page, name='spaced_review_page'),
     path('groups/', views_features.study_groups_page, name='study_groups_page'),
@@ -39,7 +49,12 @@ urlpatterns = [
     path('teacher/classes/create/', views_features.create_class_view, name='create_class'),
     path('teacher/classes/<int:class_id>/', views_features.teacher_class_detail, name='teacher_class_detail'),
     path('teacher/classes/join/', views_features.join_class_view, name='join_class'),
+    path('teacher/questions/create/', views_features.create_teacher_question, name='create_teacher_question'),
+    path('assignments/<int:assignment_id>/', views_features.take_assignment, name='take_assignment'),
+    path('assignments/<int:assignment_id>/answer/<int:question_id>/save/', views_features.save_assignment_answer, name='save_assignment_answer'),
+    path('assignments/<int:assignment_id>/submit/', views_features.submit_assignment, name='submit_assignment'),
     path('exams/<int:exam_id>/result/', views_features.exam_result_page, name='exam_result_page'),
+    path('<int:notebook_id>/learning-path/', views_features.learning_path_page, name='learning_path_page'),
 
     # ────────────── FEATURE 1: ANALYTICS API ──────────────
     path('api/analytics/', views_features.analytics_dashboard, name='analytics'),

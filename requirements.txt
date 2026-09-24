@@ -63,6 +63,7 @@ pydantic_core==2.41.5
 Pygments==2.20.0
 pypdfium2==5.8.0
 pytesseract==0.3.13
+sympy==1.14.0
 python-dateutil==2.9.0.post0
 python-decouple==3.8
 python-docx==1.1.2

@@ -27,17 +27,22 @@
     </div>
   </div>
 
-  <!-- Flashcard -->
+  <!-- Flashcard (3D flip: .flipped on the outer element rotates the inner) -->
   <div id="flashcard-container">
-    <div class="cornote-card p-5 text-center mb-4" id="flashcard" style="min-height:200px;cursor:pointer;" onclick="flipCard()">
-      <div id="card-front">
-        <p class="text-muted small mb-3" id="card-notebook">-</p>
-        <p class="h5 fw-semibold" id="card-question">-</p>
-        <p class="text-muted small mt-4"><i class="bi bi-hand-index me-1"></i>Click to reveal answer</p>
-      </div>
-      <div id="card-back" class="d-none">
-        <p class="text-muted small mb-3">Expected answer:</p>
-        <p class="h6 fw-semibold text-success" id="card-answer">-</p>
+    <div class="flip-card-3d mb-4" id="flashcard" tabindex="0" role="button" aria-pressed="false"
+         aria-label="Flashcard. Press Enter or Space to reveal the answer." onclick="flipCard()">
+      <div class="flip-card-3d-inner" id="flashcard-inner">
+        <div class="flip-card-3d-front" id="card-front">
+          <span class="flip-face-label">Question</span>
+          <p class="text-muted small mb-3" id="card-notebook">-</p>
+          <p class="h5 fw-semibold mb-0" id="card-question">-</p>
+          <span class="flip-hint"><i class="bi bi-hand-index me-1"></i>Click to reveal answer</span>
+        </div>
+        <div class="flip-card-3d-back" id="card-back" aria-hidden="true">
+          <span class="flip-face-label">Answer</span>
+          <p class="text-muted small mb-3">Expected answer:</p>
+          <p class="h6 fw-semibold text-success mb-0" id="card-answer">-</p>
+        </div>
       </div>
     </div>
 
@@ -66,9 +71,10 @@
 
   <!-- Done state -->
   <div id="review-done" class="d-none text-center py-5">
-    <i class="bi bi-trophy display-2 text-accent mb-3 d-block"></i>
-    <h3 class="fw-bold mb-1">Session Complete!</h3>
-    <p class="text-muted mb-4" id="final-score">-</p>
+    <i class="bi bi-trophy display-2 text-accent mb-3 d-block"
+       style="animation:popIn .6s var(--ease-spring) both;filter:drop-shadow(0 0 18px var(--accent-glow));"></i>
+    <h3 class="fw-bold mb-1" style="animation:popIn .5s var(--ease-spring) .2s both;">Session Complete!</h3>
+    <p class="text-muted mb-4" id="final-score" style="animation:popIn .5s var(--ease-spring) .35s both;">-</p>
     <a href="{% url 'notebooks:dashboard' %}" class="btn btn-accent me-2">Back to Dashboard</a>
     <button class="btn btn-ghost" onclick="location.reload()">Review Again</button>
   </div>
@@ -84,8 +90,9 @@
 
 </div>
 
+{{ questions|json_script:"spaced-review-questions" }}
 <script>
-const questions = {{ questions_json|safe }};
+const questions = JSON.parse(document.getElementById('spaced-review-questions').textContent);
 const CSRF = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('csrftoken='))?.split('=')[1] || '';
 
 let current = 0;
@@ -97,10 +104,22 @@ function showCard(idx) {
   document.getElementById('card-notebook').textContent = q.notebook;
   document.getElementById('card-question').textContent = q.question_text;
   document.getElementById('card-answer').textContent = q.expected_answer || '(no expected answer)';
-  document.getElementById('card-front').classList.remove('d-none');
-  document.getElementById('card-back').classList.add('d-none');
+
+  // Reset to the question face instantly (suppress the flip-back transition so the
+  // next answer is never glimpsed mid-rotation), then restore the CSS transition.
+  const card = document.getElementById('flashcard');
+  const inner = document.getElementById('flashcard-inner');
+  inner.style.transition = 'none';
+  card.classList.remove('flipped');
+  card.setAttribute('aria-pressed', 'false');
+  document.getElementById('card-back').setAttribute('aria-hidden', 'true');
+  void inner.offsetWidth; // force reflow so the instant reset is committed
+  inner.style.transition = '';
+
   document.getElementById('rating-buttons').classList.add('d-none');
   flipped = false;
+
+  if (window.cornoteRenderMath) window.cornoteRenderMath(card);
 
   // Update progress
   const pct = Math.round((idx / questions.length) * 100);
@@ -112,10 +131,17 @@ function showCard(idx) {
 function flipCard() {
   if (flipped) return;
   flipped = true;
-  document.getElementById('card-front').classList.add('d-none');
-  document.getElementById('card-back').classList.remove('d-none');
+  const card = document.getElementById('flashcard');
+  card.classList.add('flipped');
+  card.setAttribute('aria-pressed', 'true');
+  document.getElementById('card-back').setAttribute('aria-hidden', 'false');
   document.getElementById('rating-buttons').classList.remove('d-none');
 }
+
+// Keyboard: Enter / Space flips the focused card
+document.getElementById('flashcard')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flipCard(); }
+});
 
 function rate(quality) {
   const q = questions[current];

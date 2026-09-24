@@ -1,21 +1,25 @@
 import threading
 import logging
+from datetime import timedelta
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from django_htmx.http import HttpResponseClientRedirect
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST, require_GET
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, FileResponse, Http404
 from django.contrib import messages
 from django.utils import timezone
 from django.conf import settings
-from django.db.models import Q
+from django.db import transaction
+from django.db.models import Q, Count
 
-from .models import Notebook, Question, Answer, Summary, StudySession
+from .models import Notebook, Question, Answer, Summary, StudySession, NotebookChatMessage
 from .forms import PDFUploadForm, NotesEditForm, SummaryForm
 from .services.pdf_processor import truncate_for_ai
 from .services.document_processor import extract_document_text, tesseract_ocr_available
 from .services import ai_service
+from .services import grading
+from .services import throttle
 from .services.features_service import (
     AnalyticsService, SpacedRepetitionService, AchievementService,
     NotificationService, ExamService, LearningPathService, PreferencesService
@@ -68,8 +72,14 @@ def _process_notebook(notebook_id: int):
                 question = Question.objects.create(
                     notebook=notebook,
                     question_text=q_data.get('question_text', ''),
+                    question_type=q_data.get('question_type') or Question.QUESTION_TYPE_SHORT_ANSWER,
+                    is_math=bool(q_data.get('is_math')),
                     expected_answer=q_data.get('expected_answer', ''),
                     expected_keywords=q_data.get('expected_keywords', []),
+                    choices=q_data.get('choices', []),
+                    correct_choices=q_data.get('correct_choices', []),
+                    matching_pairs=q_data.get('matching_pairs', []),
+                    correct_order=q_data.get('correct_order', []),
                     order_index=idx + 1,
                 )
                 Answer.objects.create(question=question)
@@ -235,8 +245,107 @@ def save_answer(request, question_pk):
         answer.grade = Answer.GRADE_UNGRADED
         answer.feedback = ''
         answer.graded_at = None
+
+    # Exam mode submits answers through this same endpoint - link them to the
+    # exam session (ownership-checked) so exam finalization can find and grade them.
+    exam_session_id = request.POST.get('exam_session_id')
+    if exam_session_id:
+        from .models import ExamSession
+        exam_session = ExamSession.objects.filter(pk=exam_session_id, user=request.user).first()
+        if exam_session:
+            answer.exam_session = exam_session
+
     answer.save()
     return render(request, 'notebooks/partials/autosave_indicator.html', {'saved': True, 'target': f'answer-{question_pk}'})
+
+
+# ────────────────────────── HTMX: Get a Hint ──────────────────────────
+
+@login_required
+@require_POST
+def get_hint(request, question_pk):
+    question = get_object_or_404(Question, pk=question_pk, notebook__user=request.user)
+    level = int(request.POST.get('level', 1))
+    level = 1 if level not in (1, 2) else level
+
+    if throttle.is_throttled(request.user, 'hint', seconds=2):
+        return render(request, 'notebooks/partials/hint.html', {
+            'question': question, 'hint_text': None, 'level': level,
+            'error': 'Slow down a little - one hint request at a time.',
+        })
+
+    try:
+        hint_text = ai_service.generate_hint(
+            question_text=question.question_text,
+            expected_answer=question.expected_answer,
+            expected_keywords=question.expected_keywords,
+            level=level,
+        )
+        error = None
+    except Exception as exc:
+        hint_text = None
+        error = ai_service.friendly_error(exc)
+
+    return render(request, 'notebooks/partials/hint.html', {
+        'question': question,
+        'hint_text': hint_text,
+        'level': level,
+        'error': error,
+    })
+
+
+# ────────────────────────── AI Tutor Chat ──────────────────────────
+
+@login_required
+def notebook_chat_page(request, pk):
+    notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
+    chat_messages = notebook.chat_messages.filter(user=request.user)
+    return render(request, 'notebooks/notebook_chat.html', {
+        'notebook': notebook,
+        'chat_messages': chat_messages,
+    })
+
+
+@login_required
+@require_POST
+def notebook_chat(request, pk):
+    notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
+    question = (request.POST.get('message') or '').strip()
+    if not question:
+        return render(request, 'notebooks/partials/chat_messages.html', {
+            'new_messages': [], 'error': 'Type a question first.',
+        })
+
+    if throttle.is_throttled(request.user, 'notebook_chat', seconds=2):
+        return render(request, 'notebooks/partials/chat_messages.html', {
+            'new_messages': [], 'error': 'Slow down a little - one message at a time.',
+        })
+
+    source_text = notebook.pdf_text or notebook.notes_content
+    history_payload = [
+        {'role': m.role, 'content': m.content}
+        for m in notebook.chat_messages.filter(user=request.user).order_by('-created_at')[:10][::-1]
+    ]
+
+    user_msg = NotebookChatMessage.objects.create(
+        notebook=notebook, user=request.user, role=NotebookChatMessage.ROLE_USER, content=question,
+    )
+
+    assistant_msg = None
+    error = None
+    try:
+        answer = ai_service.answer_notebook_question(source_text, history_payload, question)
+        assistant_msg = NotebookChatMessage.objects.create(
+            notebook=notebook, user=request.user, role=NotebookChatMessage.ROLE_ASSISTANT, content=answer,
+        )
+    except Exception as exc:
+        logger.exception('Notebook chat failed for notebook %s', pk)
+        error = ai_service.friendly_error(exc)
+
+    return render(request, 'notebooks/partials/chat_messages.html', {
+        'new_messages': [m for m in (user_msg, assistant_msg) if m],
+        'error': error,
+    })
 
 
 # ────────────────────────── HTMX: Grade All Answers ──────────────────────────
@@ -247,41 +356,81 @@ def grade_answers(request, pk):
     notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
     questions = notebook.questions.prefetch_related('answer').all()
 
-    graded = []
+    results_by_pk = {}  # question.pk -> already-saved answer, in whatever order it was graded
+    pending = []  # (question, answer) still needing an AI call
+
     for question in questions:
         answer = getattr(question, 'answer', None)
         if answer is None:
             continue
+
         if not answer.user_answer.strip():
             answer.grade = Answer.GRADE_INCORRECT
             expected_keywords_str = ', '.join(question.expected_keywords) if question.expected_keywords else 'N/A'
             answer.feedback = f'No answer provided. Expected concepts: {expected_keywords_str}'
             answer.graded_at = timezone.now()
             answer.save()
-            graded.append((question, answer))
+            results_by_pk[question.pk] = answer
             continue
 
-        try:
-            result = ai_service.grade_answer(
-                question_text=question.question_text,
-                expected_answer=question.expected_answer,
-                expected_keywords=question.expected_keywords,
-                user_answer=answer.user_answer,
-            )
-            answer.grade = result['grade']
-            answer.feedback = result['feedback']
+        # Multiple choice/true-false/multiple-select/ordering/matching have
+        # enough structured data to grade exactly, with zero AI calls - faster,
+        # free, and not dependent on the model reading the selection correctly.
+        structured = grading.grade_structured_answer(question, answer.user_answer)
+        if structured is not None:
+            answer.grade = structured['grade']
+            answer.feedback = structured['feedback']
             answer.graded_at = timezone.now()
             answer.save()
-        except Exception as exc:
-            logger.exception('Error grading question %s', question.pk)
-            answer.grade = Answer.GRADE_UNGRADED
-            answer.feedback = f'Grading failed: {ai_service.friendly_error(exc)}'
+            results_by_pk[question.pk] = answer
+        else:
+            pending.append((question, answer))
+
+    # Everything left (short answer / fill-in-the-blank) needs real AI judgment -
+    # grade those concurrently instead of one HTTP round-trip at a time.
+    if pending:
+        items = [
+            {
+                'question_text': q.question_text,
+                'expected_answer': q.expected_answer,
+                'expected_keywords': q.expected_keywords,
+                'user_answer': a.user_answer,
+            }
+            for q, a in pending
+        ]
+        batch_results = ai_service.grade_answer_batch(items)
+        for (question, answer), result in zip(pending, batch_results):
+            if result['ok']:
+                answer.grade = result['grade']
+                answer.feedback = result['feedback']
+            else:
+                logger.warning('Error grading question %s: %s', question.pk, result['error'])
+                answer.grade = Answer.GRADE_UNGRADED
+                answer.feedback = f"Grading failed: {result['error']}"
+            answer.graded_at = timezone.now()
             answer.save()
-        graded.append((question, answer))
+            results_by_pk[question.pk] = answer
+
+    graded = [(q, results_by_pk[q.pk]) for q in questions if q.pk in results_by_pk]
+
+    # Feed missed questions into the spaced-repetition queue so "review your
+    # weak spots" has something real to point at (this service existed but was
+    # never actually called anywhere - dead code until now).
+    missed_questions = []
+    correct_count = 0
+    for question, answer in graded:
+        if answer.grade in (Answer.GRADE_PARTIAL, Answer.GRADE_INCORRECT):
+            SpacedRepetitionService.update_difficulty_score(question, answer.grade)
+            missed_questions.append(question)
+        elif answer.grade == Answer.GRADE_CORRECT:
+            correct_count += 1
 
     return render(request, 'notebooks/partials/grade_results.html', {
         'graded': graded,
         'notebook': notebook,
+        'correct_count': correct_count,
+        'missed_count': len(missed_questions),
+        'total_graded': len(graded),
     })
 
 
@@ -295,6 +444,8 @@ def reformat_notes(request, pk):
     text = notebook.pdf_text or notebook.notes_content
     if not text.strip():
         return JsonResponse({'error': 'No content to format.'}, status=400)
+    if throttle.is_throttled(request.user, 'reformat_notes', seconds=3):
+        return JsonResponse({'error': 'Slow down a little - please wait a moment and try again.'}, status=429)
     try:
         formatted = ai_service.format_notes_as_markdown(text)
         notebook.notes_content = formatted
@@ -327,6 +478,12 @@ def summary_feedback(request, pk):
     summary, _ = Summary.objects.get_or_create(notebook=notebook)
     summary.user_summary = request.POST.get('user_summary', summary.user_summary)
     summary.save(update_fields=['user_summary'])
+
+    if throttle.is_throttled(request.user, 'summary_feedback', seconds=3):
+        return render(request, 'notebooks/partials/summary_feedback.html', {
+            'error': 'Slow down a little - please wait a moment and try again.',
+            'summary': summary,
+        })
 
     if not summary.key_points:
         try:
@@ -398,7 +555,14 @@ def generate_notes_summary(request, pk):
     """Generate an AI summary of the study notes."""
     notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
     summary, _ = Summary.objects.get_or_create(notebook=notebook)
-    
+
+    if throttle.is_throttled(request.user, 'notes_summary', seconds=3):
+        return render(request, 'notebooks/partials/notes_summary.html', {
+            'error': 'Slow down a little - please wait a moment and try again.',
+            'summary': summary,
+            'notebook': notebook,
+        })
+
     try:
         refresh = request.POST.get('refresh') or request.GET.get('refresh')
         # Regenerate if: no summary yet, user requested refresh, or old summary looks truncated
@@ -446,7 +610,13 @@ def generate_audio_summary(request, pk):
     """Generate an audio TTS summary of the study material."""
     notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
     summary, _ = Summary.objects.get_or_create(notebook=notebook)
-    
+
+    if throttle.is_throttled(request.user, 'audio_summary', seconds=5):
+        return JsonResponse({
+            'error': 'Slow down a little - please wait a moment and try again.',
+            'success': False,
+        }, status=429)
+
     try:
         # Use existing AI summary or notes content
         text_to_convert = summary.ai_summary or notebook.notes_content or notebook.pdf_text
@@ -479,7 +649,7 @@ def generate_audio_summary(request, pk):
         
         return JsonResponse({
             'success': True,
-            'audio_url': f'{settings.MEDIA_URL}{audio_file}',
+            'audio_url': reverse('notebooks:summary_audio_file', args=[notebook.pk]),
             'audio_content_type': audio_content_type,
             'message': 'Audio summary generated successfully!'
         })
@@ -555,3 +725,71 @@ def export_anki(request, pk):
     response = HttpResponse(data, content_type='application/octet-stream')
     response['Content-Disposition'] = f'attachment; filename="{safe_title}.apkg"'
     return response
+
+
+# ────────────────────────── Sharing & gated file access ──────────────────────────
+#
+# Notebook.is_public / share_token / shared_with existed on the model but had no
+# view anywhere that used them - uploaded files (PDFs, generated audio) were only
+# ever served via Django's plain media handler, which applies no access control at
+# all: anyone with a file's URL could download it, private or not. These views close
+# that gap and give the existing sharing fields an actual feature.
+
+def _can_view_notebook(user, notebook, token=None):
+    if user.is_authenticated and notebook.user_id == user.pk:
+        return True
+    if notebook.is_public and token and notebook.share_token and token == notebook.share_token:
+        return True
+    if user.is_authenticated and notebook.shared_with.filter(pk=user.pk).exists():
+        return True
+    return False
+
+
+def serve_notebook_pdf(request, pk):
+    """Gated replacement for linking straight to notebook.pdf_file.url."""
+    notebook = get_object_or_404(Notebook, pk=pk)
+    if not _can_view_notebook(request.user, notebook, token=request.GET.get('token')):
+        raise Http404()
+    if not notebook.pdf_file:
+        raise Http404()
+    return FileResponse(
+        notebook.pdf_file.open('rb'),
+        filename=notebook.pdf_file.name.rsplit('/', 1)[-1],
+    )
+
+
+@login_required
+def serve_summary_audio(request, pk):
+    """Gated replacement for linking straight to summary.audio_file.url. Audio
+    is owner-only for now - the public share view doesn't expose it."""
+    notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
+    summary = getattr(notebook, 'summary', None)
+    if not summary or not summary.audio_file:
+        raise Http404()
+    return FileResponse(summary.audio_file.open('rb'))
+
+
+@login_required
+@require_POST
+def toggle_notebook_sharing(request, pk):
+    """Turn public sharing on/off for a notebook. Returns the share URL when enabling."""
+    notebook = get_object_or_404(Notebook, pk=pk, user=request.user)
+    notebook.is_public = request.POST.get('is_public', 'false').lower() == 'true'
+    notebook.save()  # model.save() mints a share_token the first time is_public becomes True
+    share_url = None
+    if notebook.is_public:
+        share_url = request.build_absolute_uri(
+            reverse('notebooks:shared_notebook', args=[notebook.share_token])
+        )
+    return JsonResponse({'is_public': notebook.is_public, 'share_url': share_url})
+
+
+def shared_notebook_view(request, token):
+    """Read-only public view of a notebook shared via its token - no login required.
+    Deliberately simple (no grading, no editing, no audio): a study-guide-style
+    read-only view of the notes and questions with their model answers."""
+    notebook = get_object_or_404(Notebook, share_token=token, is_public=True)
+    return render(request, 'notebooks/shared_notebook.html', {
+        'notebook': notebook,
+        'questions': notebook.questions.all(),
+    })

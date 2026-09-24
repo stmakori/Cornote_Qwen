@@ -43,8 +43,8 @@ class NotebookAdmin(admin.ModelAdmin):
 
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
-    list_display = ('notebook', 'order_index', 'question_text', 'question_type', 'difficulty')
-    list_filter = ('question_type', 'difficulty', 'notebook')
+    list_display = ('notebook', 'order_index', 'question_text', 'question_type', 'difficulty', 'is_math')
+    list_filter = ('question_type', 'difficulty', 'is_math', 'notebook')
 
 
 @admin.register(Answer)

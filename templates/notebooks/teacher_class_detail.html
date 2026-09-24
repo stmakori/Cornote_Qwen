@@ -12,9 +12,10 @@
       </a>
       <div>
         <h1 class="h4 fw-bold mb-0">{{ cls.name }}</h1>
-        <p class="text-muted small mb-0">{{ cls.subject }}</p>
+        <p class="text-muted small mb-0">{{ cls.subject }}{% if is_student %} · <span class="text-accent">You're enrolled</span>{% endif %}</p>
       </div>
     </div>
+    {% if is_teacher %}
     <div class="d-flex gap-2 align-items-center">
       <span class="text-muted small">Invite code:</span>
       <code class="p-1 px-2 rounded" style="background:var(--bg-elevated);">{{ cls.invite_code }}</code>
@@ -22,7 +23,43 @@
         <i class="bi bi-copy"></i>
       </button>
     </div>
+    {% endif %}
   </div>
+
+  {% if is_teacher and statistics %}
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+      <div class="cornote-card p-3 text-center">
+        <div class="h4 fw-bold mb-0">{{ statistics.total_students }}</div>
+        <div class="text-muted small">Students</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="cornote-card p-3 text-center">
+        <div class="progress-ring ring-sm mx-auto" style="--ring-value: {{ statistics.average_accuracy|floatformat:0 }}" role="img" aria-label="{{ statistics.average_accuracy }}% average accuracy">
+          <svg viewBox="0 0 100 100">
+            <circle class="ring-track" cx="50" cy="50" r="42"></circle>
+            <circle class="ring-progress" cx="50" cy="50" r="42" pathLength="100"></circle>
+          </svg>
+          <div class="ring-label">{{ statistics.average_accuracy|floatformat:0 }}%</div>
+        </div>
+        <div class="text-muted small mt-1">Avg. accuracy</div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6">
+      <div class="cornote-card p-3 h-100">
+        <div class="text-muted small fw-semibold mb-1"><i class="bi bi-exclamation-triangle me-1"></i>Hardest questions</div>
+        {% if statistics.most_difficult_topics %}
+          <ul class="small mb-0 ps-3">
+            {% for topic in statistics.most_difficult_topics %}<li>{{ topic }}</li>{% endfor %}
+          </ul>
+        {% else %}
+          <p class="text-muted small mb-0">No graded assignment submissions yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <div class="row g-3">
     <!-- Students -->
@@ -49,10 +86,17 @@
     <div class="col-lg-8">
       <div class="cornote-card p-4">
         <div class="d-flex align-items-center justify-content-between mb-3">
-          <h6 class="fw-semibold mb-0"><i class="bi bi-journal-check me-2 text-muted"></i>Assignments ({{ assignments.count }})</h6>
-          <button class="btn btn-accent btn-sm" data-bs-toggle="modal" data-bs-target="#assignModal">
-            <i class="bi bi-plus me-1"></i>New Assignment
-          </button>
+          <h6 class="fw-semibold mb-0"><i class="bi bi-journal-check me-2 text-muted"></i>Assignments ({{ assignments|length }})</h6>
+          {% if is_teacher %}
+          <div class="d-flex gap-2">
+            <button class="btn btn-ghost btn-sm" data-bs-toggle="modal" data-bs-target="#questionModal" title="Write a question for your question bank">
+              <i class="bi bi-plus me-1"></i>New Question
+            </button>
+            <button class="btn btn-accent btn-sm" data-bs-toggle="modal" data-bs-target="#assignModal">
+              <i class="bi bi-plus me-1"></i>New Assignment
+            </button>
+          </div>
+          {% endif %}
         </div>
         {% if assignments %}
           {% for assignment in assignments %}
@@ -60,8 +104,22 @@
             <div>
               <div class="fw-semibold small">{{ assignment.title }}</div>
               <div class="text-muted" style="font-size:.75rem;">{{ assignment.description|truncatechars:80 }}</div>
+              <div class="text-muted" style="font-size:.7rem;">{{ assignment.questions.count }} question{{ assignment.questions.count|pluralize }}</div>
             </div>
-            <small class="text-muted flex-shrink-0 ms-3">Due {{ assignment.due_date|date:"M j" }}</small>
+            <div class="text-end flex-shrink-0 ms-3">
+              <small class="text-muted d-block mb-1">Due {{ assignment.due_date|date:"M j" }}</small>
+              {% if is_student %}
+                <a href="{% url 'notebooks:take_assignment' assignment.pk %}" class="btn btn-sm btn-outline-accent">
+                  {% if assignment.my_total > 0 and assignment.my_graded == assignment.my_total %}
+                    <i class="bi bi-check-circle me-1"></i>{{ assignment.my_graded }}/{{ assignment.my_total }} done
+                  {% elif assignment.my_graded > 0 %}
+                    <i class="bi bi-pencil-square me-1"></i>{{ assignment.my_graded }}/{{ assignment.my_total }} graded
+                  {% else %}
+                    <i class="bi bi-pencil-square me-1"></i>Open
+                  {% endif %}
+                </a>
+              {% endif %}
+            </div>
           </div>
           {% endfor %}
         {% else %}
@@ -76,10 +134,11 @@
 
 </div>
 
+{% if is_teacher %}
 <!-- New Assignment Modal -->
 <div class="modal fade" id="assignModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content" style="background:var(--bg-surface);border:1px solid var(--bg-border)">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content glass">
       <div class="modal-header" style="border-bottom:1px solid var(--bg-border)">
         <h5 class="modal-title">New Assignment</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -100,6 +159,23 @@
             <label class="form-label fw-semibold">Due Date</label>
             <input type="datetime-local" name="due_date" class="form-control" required>
           </div>
+          <div class="mb-1">
+            <label class="form-label fw-semibold">Questions to include</label>
+            <div class="p-2 rounded" style="max-height:260px;overflow-y:auto;background:var(--bg-elevated);border:1px solid var(--bg-border);">
+              {% regroup teacher_questions by notebook as notebook_groups %}
+              {% for group in notebook_groups %}
+                <div class="small text-muted fw-semibold mt-2 mb-1">{{ group.grouper.title }}</div>
+                {% for question in group.list %}
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="question_ids" value="{{ question.pk }}" id="q-{{ question.pk }}">
+                  <label class="form-check-label small" for="q-{{ question.pk }}">{{ question.question_text|truncatechars:90 }}</label>
+                </div>
+                {% endfor %}
+              {% empty %}
+                <p class="text-muted small mb-0">No questions yet. Use <strong>New Question</strong> to write one by hand, or upload a notebook to generate some, then come back to build an assignment.</p>
+              {% endfor %}
+            </div>
+          </div>
         </div>
         <div class="modal-footer" style="border-top:1px solid var(--bg-border)">
           <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
@@ -109,4 +185,136 @@
     </div>
   </div>
 </div>
+
+<!-- New Question (question bank) Modal -->
+<div class="modal fade" id="questionModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content glass">
+      <div class="modal-header" style="border-bottom:1px solid var(--bg-border)">
+        <div>
+          <h5 class="modal-title mb-0">New Question</h5>
+          <div class="text-muted small">Saved to your question bank, ready to attach to any assignment.</div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{% url 'notebooks:create_teacher_question' %}" id="question-bank-form">
+        {% csrf_token %}
+        <input type="hidden" name="class_id" value="{{ cls.id }}">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="qb-type">Type</label>
+            <select name="question_type" id="qb-type" class="form-select">
+              {% for value, label in manual_question_types %}
+              <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="qb-text">Question</label>
+            <textarea name="question_text" id="qb-text" class="form-control" rows="3" required
+                      placeholder="e.g. What organelle produces ATP?"></textarea>
+          </div>
+
+          <!-- short_answer / fill_blank -->
+          <div class="qb-field mb-3" data-for="short_answer fill_blank">
+            <label class="form-label fw-semibold" for="qb-expected">Expected answer</label>
+            <input type="text" name="expected_answer" id="qb-expected" class="form-control"
+                   placeholder="The reference answer used for grading">
+          </div>
+          <div class="qb-field mb-3" data-for="short_answer fill_blank">
+            <label class="form-label fw-semibold" for="qb-keywords">Key concepts <span class="text-muted fw-normal">(optional, comma-separated)</span></label>
+            <input type="text" name="expected_keywords" id="qb-keywords" class="form-control"
+                   placeholder="mitochondria, ATP, respiration">
+          </div>
+          <div class="qb-field mb-3 form-check" data-for="short_answer fill_blank">
+            <input class="form-check-input" type="checkbox" name="is_math" id="qb-math" value="on">
+            <label class="form-check-label" for="qb-math">
+              Math question <span class="text-muted small">- LaTeX is rendered and answers graded symbolically (e.g. <code>2x+1</code> matches <code>1+2x</code>)</span>
+            </label>
+          </div>
+
+          <!-- true_false -->
+          <div class="qb-field mb-3" data-for="true_false">
+            <label class="form-label fw-semibold" for="qb-tf">Correct answer</label>
+            <select id="qb-tf" class="form-select" data-target="expected_answer">
+              <option value="True">True</option>
+              <option value="False">False</option>
+            </select>
+          </div>
+
+          <!-- multiple_choice -->
+          <div class="qb-field mb-3" data-for="multiple_choice">
+            <label class="form-label fw-semibold" for="qb-choices">Choices <span class="text-muted fw-normal">(one per line, at least 2)</span></label>
+            <textarea name="choices" id="qb-choices" class="form-control" rows="4"
+                      placeholder="Mitochondria&#10;Ribosome&#10;Nucleus&#10;Golgi apparatus"></textarea>
+          </div>
+          <div class="qb-field mb-3" data-for="multiple_choice">
+            <label class="form-label fw-semibold" for="qb-correct">Correct choice</label>
+            <select name="correct_choice" id="qb-correct" class="form-select">
+              <option value="">Enter choices above first</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer" style="border-top:1px solid var(--bg-border)">
+          <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-accent">Add to bank</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var form = document.getElementById('question-bank-form');
+  if (!form) return;
+  var typeSelect = form.querySelector('#qb-type');
+  var fields = form.querySelectorAll('.qb-field');
+  var tfSelect = form.querySelector('#qb-tf');
+  var expected = form.querySelector('#qb-expected');
+  var choicesBox = form.querySelector('#qb-choices');
+  var correctSelect = form.querySelector('#qb-correct');
+
+  function showFieldsFor(type) {
+    fields.forEach(function (el) {
+      var visible = el.getAttribute('data-for').split(' ').indexOf(type) !== -1;
+      el.classList.toggle('d-none', !visible);
+      // Disabled inputs aren't submitted, so hidden types don't leak stray values.
+      el.querySelectorAll('input, select, textarea').forEach(function (inp) { inp.disabled = !visible; });
+    });
+    if (type === 'true_false') {
+      // Reuse the expected_answer field name for the True/False pick.
+      expected.disabled = true;
+      tfSelect.setAttribute('name', 'expected_answer');
+    } else {
+      tfSelect.removeAttribute('name');
+    }
+  }
+
+  function rebuildCorrectChoices() {
+    var lines = choicesBox.value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+    var prev = correctSelect.value;
+    correctSelect.innerHTML = '';
+    if (lines.length === 0) {
+      var opt = document.createElement('option');
+      opt.value = ''; opt.textContent = 'Enter choices above first';
+      correctSelect.appendChild(opt);
+      return;
+    }
+    lines.forEach(function (text, i) {
+      var opt = document.createElement('option');
+      opt.value = String(i + 1);
+      opt.textContent = (i + 1) + '. ' + text;
+      correctSelect.appendChild(opt);
+    });
+    if (prev && Number(prev) <= lines.length) correctSelect.value = prev;
+  }
+
+  typeSelect.addEventListener('change', function () { showFieldsFor(typeSelect.value); });
+  choicesBox.addEventListener('input', rebuildCorrectChoices);
+  showFieldsFor(typeSelect.value);
+  rebuildCorrectChoices();
+})();
+</script>
+{% endif %}
 {% endblock %}

@@ -6,11 +6,21 @@
 
   <!-- Score header -->
   <div class="text-center mb-5">
-    <div class="display-2 fw-bold mb-2
-      {% if report.score_percentage >= 80 %}text-success
-      {% elif report.score_percentage >= 60 %}text-warning
-      {% else %}text-danger{% endif %}">
-      {{ report.score_percentage|floatformat:1 }}%
+    <div class="d-flex justify-content-center mb-3">
+      <div class="progress-ring ring-lg {% if report.score_percentage >= 80 %}ring-success{% elif report.score_percentage < 60 %}ring-danger{% endif %}"
+           style="--ring-value: {{ report.score_percentage|floatformat:0 }}"
+           role="img" aria-label="Exam score {{ report.score_percentage|floatformat:1 }} percent">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="ring-track" cx="50" cy="50" r="42"/>
+          <circle class="ring-progress" cx="50" cy="50" r="42" pathLength="100"/>
+        </svg>
+        <div class="ring-label
+          {% if report.score_percentage >= 80 %}text-success
+          {% elif report.score_percentage >= 60 %}text-warning
+          {% else %}text-danger{% endif %}">
+          {{ report.score_percentage|floatformat:0 }}%<span class="ring-sub">score</span>
+        </div>
+      </div>
     </div>
     <h1 class="h4 fw-semibold mb-1">{{ exam.notebook.title }}</h1>
     <p class="text-muted small">

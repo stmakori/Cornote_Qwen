@@ -27,9 +27,10 @@
   </div>
   {% endif %}
 
-  <!-- Classes Grid -->
+  <!-- Classes I teach -->
+  <h6 class="text-muted fw-semibold mb-3 text-uppercase" style="font-size:.7rem;letter-spacing:.08em;">Classes I Teach</h6>
   {% if classes %}
-  <div class="row g-3">
+  <div class="row g-3 mb-5">
     {% for cls in classes %}
     <div class="col-sm-6 col-lg-4">
       <a href="{% url 'notebooks:teacher_class_detail' cls.id %}" class="cornote-card d-block p-4 text-decoration-none h-100">
@@ -47,10 +48,33 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="text-center py-5 text-muted">
+  <div class="text-center py-4 mb-5 text-muted">
     <i class="bi bi-mortarboard display-4 d-block mb-3"></i>
     <p class="h6 mb-2">No classes yet</p>
     <p class="small">Create your first class to get started.</p>
+  </div>
+  {% endif %}
+
+  <!-- Classes I'm enrolled in -->
+  <h6 class="text-muted fw-semibold mb-3 text-uppercase" style="font-size:.7rem;letter-spacing:.08em;">Classes I'm Enrolled In</h6>
+  {% if enrolled_classes %}
+  <div class="row g-3">
+    {% for cls in enrolled_classes %}
+    <div class="col-sm-6 col-lg-4">
+      <a href="{% url 'notebooks:teacher_class_detail' cls.id %}" class="cornote-card d-block p-4 text-decoration-none h-100">
+        <div class="d-flex align-items-start justify-content-between mb-2">
+          <h6 class="fw-semibold mb-0">{{ cls.name }}</h6>
+          <span class="badge" style="background:var(--bg-elevated);font-size:.65rem;">{{ cls.subject }}</span>
+        </div>
+        <p class="text-muted small mb-0"><i class="bi bi-person-badge me-1"></i>Taught by {{ cls.teacher.username }}</p>
+      </a>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-center py-4 text-muted">
+    <i class="bi bi-journal-plus display-4 d-block mb-3"></i>
+    <p class="small">You haven't joined a class yet. Ask your teacher for an invite code.</p>
   </div>
   {% endif %}
 
@@ -59,7 +83,7 @@
 <!-- Create Class Modal -->
 <div class="modal fade" id="createClassModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content" style="background:var(--bg-surface);border:1px solid var(--bg-border)">
+    <div class="modal-content glass">
       <div class="modal-header" style="border-bottom:1px solid var(--bg-border)">
         <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Create Class</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -92,7 +116,7 @@
 <!-- Join Class Modal (for students) -->
 <div class="modal fade" id="joinClassModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content" style="background:var(--bg-surface);border:1px solid var(--bg-border)">
+    <div class="modal-content glass">
       <div class="modal-header" style="border-bottom:1px solid var(--bg-border)">
         <h5 class="modal-title"><i class="bi bi-key me-2"></i>Join a Class</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>

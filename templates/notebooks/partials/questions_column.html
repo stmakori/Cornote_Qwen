@@ -45,21 +45,12 @@
 
     <p class="question-text">{{ question.question_text }}</p>
 
-    <textarea
-      class="answer-input w-100"
-      name="user_answer"
-      placeholder="Your answer…"
-      rows="4"
-      hx-post="{% url 'notebooks:save_answer' question.pk %}"
-      hx-trigger="keyup changed delay:1200ms"
-      hx-target="#save-ind-{{ question.pk }}"
-      hx-swap="innerHTML"
-    >{% if question.answer %}{{ question.answer.user_answer }}{% endif %}</textarea>
+    {% include 'notebooks/partials/_answer_widget.html' with question=question answer=question.answer readonly=False autosave=True show_hint=True %}
 
     <div class="d-flex align-items-center justify-content-between mt-2">
       <span id="save-ind-{{ question.pk }}" class="save-indicator"></span>
       {% if question.answer and question.answer.grade != 'ungraded' %}
-      <span class="badge bg-{{ question.answer.badge_color }} grade-badge">
+      <span class="badge bg-{{ question.answer.badge_color }} grade-badge badge-{{ question.answer.grade }}">
         {% if question.answer.grade == 'correct' %}<i class="bi bi-check-circle me-1"></i>Correct
         {% elif question.answer.grade == 'partial' %}<i class="bi bi-dash-circle me-1"></i>Partial
         {% else %}<i class="bi bi-x-circle me-1"></i>Incorrect{% endif %}

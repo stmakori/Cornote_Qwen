@@ -34,19 +34,11 @@
     <span class="question-number">Q{{ question.order_index }}</span>
     <p class="question-text mt-1">{{ question.question_text }}</p>
 
-    <textarea
-      class="answer-input w-100"
-      name="user_answer"
-      rows="4"
-      hx-post="{% url 'notebooks:save_answer' question.pk %}"
-      hx-trigger="keyup changed delay:1200ms"
-      hx-target="#save-ind-{{ question.pk }}"
-      hx-swap="innerHTML"
-    >{{ answer.user_answer }}</textarea>
+    {% include 'notebooks/partials/_answer_widget.html' with question=question answer=answer readonly=False autosave=True show_hint=True %}
 
     <div class="d-flex align-items-center justify-content-between mt-2">
       <span id="save-ind-{{ question.pk }}" class="save-indicator"></span>
-      <span class="badge bg-{{ answer.badge_color }} grade-badge">
+      <span class="badge bg-{{ answer.badge_color }} grade-badge badge-{{ answer.grade }}">
         {% if answer.grade == 'correct' %}<i class="bi bi-check-circle me-1"></i>Correct
         {% elif answer.grade == 'partial' %}<i class="bi bi-dash-circle me-1"></i>Partially Correct
         {% elif answer.grade == 'incorrect' %}<i class="bi bi-x-circle me-1"></i>Incorrect
@@ -76,6 +68,11 @@
 
   <!-- Re-grade -->
   <div class="p-3 mt-2" style="border-top:1px solid var(--bg-border);">
+    {% if missed_count > 0 %}
+    <a href="{% url 'notebooks:spaced_review_page' %}" class="btn btn-sm btn-accent w-100 mb-2">
+      <i class="bi bi-arrow-repeat me-1"></i>Review your {{ missed_count }} missed question{{ missed_count|pluralize }}
+    </a>
+    {% endif %}
     <button class="btn btn-sm btn-outline-accent w-100"
             hx-post="{% url 'notebooks:grade_answers' notebook.pk %}"
             hx-target="#questions-column"
@@ -86,3 +83,17 @@
     </button>
   </div>
 </div>
+
+{% if total_graded > 0 %}
+<script>
+(function () {
+  if (typeof window.cornoteToast !== 'function') return;
+  window.cornoteToast({
+    title: '{{ correct_count|escapejs }}/{{ total_graded|escapejs }} correct',
+    subtitle: {% if missed_count > 0 %}'{{ missed_count|escapejs }} question{{ missed_count|pluralize|escapejs }} to review'{% else %}'Great work — all correct!'{% endif %},
+    icon: {% if missed_count == 0 %}'bi-trophy-fill'{% else %}'bi-check2-circle'{% endif %},
+    variant: {% if missed_count == 0 %}'success'{% else %}'primary'{% endif %}
+  });
+})();
+</script>
+{% endif %}

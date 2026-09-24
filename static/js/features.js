@@ -100,6 +100,16 @@
         if (summary) summary.focus();
       }
 
+      // Ctrl+Shift+H or Cmd+Shift+H → Get a hint for the current question
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        const hintBtn = document.querySelector('.q-detail .question-block:not(.d-none) .hint-btn');
+        if (hintBtn && !hintBtn.disabled) {
+          hintBtn.click();
+          showNotification('Requesting hint...', 'info');
+        }
+      }
+
       // Ctrl+? or Ctrl+Shift+/ → Show shortcuts help (browser may use Ctrl+Shift+/)
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === '?' || e.key === '/')) {
         e.preventDefault();
@@ -167,6 +177,10 @@
                 <tr>
                   <td><kbd>Ctrl+S</kbd></td>
                   <td>Save all (notes, answers, summary)</td>
+                </tr>
+                <tr>
+                  <td><kbd>Ctrl+Shift+H</kbd></td>
+                  <td>Get a hint for the current question</td>
                 </tr>
                 <tr>
                   <td><kbd>Ctrl+1</kbd></td>

@@ -20,28 +20,34 @@
     <!-- Key Metrics Row -->
     <div class="row g-3 mb-4">
         <div class="col-6 col-md-3">
-            <div class="cornote-card p-3 text-center">
+            <div class="cornote-card p-3 text-center h-100 d-flex flex-column align-items-center justify-content-center">
                 <i class="bi bi-question-circle fs-3 mb-2" style="color:var(--primary)"></i>
                 <div class="h3 fw-bold mb-0" id="totalQuestions">-</div>
                 <div class="text-muted small">Questions Answered</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
-            <div class="cornote-card p-3 text-center">
-                <i class="bi bi-bullseye fs-3 mb-2" style="color:var(--secondary)"></i>
-                <div class="h3 fw-bold mb-0" id="accuracy">-</div>
-                <div class="text-muted small">Accuracy</div>
+            <div class="cornote-card p-3 text-center h-100 d-flex flex-column align-items-center justify-content-center">
+                <!-- Accuracy ring: --ring-value (0-100) is set by loadAnalytics() once the fetch resolves -->
+                <div class="progress-ring" id="accuracyRing" style="--ring-value: 0" role="img" aria-label="Accuracy: loading">
+                    <svg viewBox="0 0 100 100" aria-hidden="true">
+                        <circle class="ring-track" cx="50" cy="50" r="42"/>
+                        <circle class="ring-progress" cx="50" cy="50" r="42" pathLength="100"/>
+                    </svg>
+                    <div class="ring-label"><span id="accuracy">-</span></div>
+                </div>
+                <div class="text-muted small mt-2">Accuracy</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
-            <div class="cornote-card p-3 text-center">
+            <div class="cornote-card p-3 text-center h-100 d-flex flex-column align-items-center justify-content-center">
                 <i class="bi bi-fire fs-3 mb-2" style="color:var(--accent)"></i>
                 <div class="h3 fw-bold mb-0" id="streak">-</div>
                 <div class="text-muted small">Day Streak</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
-            <div class="cornote-card p-3 text-center">
+            <div class="cornote-card p-3 text-center h-100 d-flex flex-column align-items-center justify-content-center">
                 <i class="bi bi-clock-history fs-3 mb-2" style="color:#06b6d4"></i>
                 <div class="h3 fw-bold mb-0" id="studyTime">-</div>
                 <div class="text-muted small">Minutes Studied</div>
@@ -104,6 +110,16 @@ async function loadAnalytics() {
         // Update key metrics
         document.getElementById('totalQuestions').textContent = data.overall.total_questions;
         document.getElementById('accuracy').textContent = data.overall.accuracy_percentage.toFixed(1) + '%';
+        // Drive the accuracy progress ring (display only; the value is unchanged)
+        const accuracyPct = Math.max(0, Math.min(100, Math.round(data.overall.accuracy_percentage)));
+        const ring = document.getElementById('accuracyRing');
+        if (ring) {
+            ring.style.setProperty('--ring-value', accuracyPct);
+            ring.setAttribute('aria-label', `${accuracyPct}% accuracy`);
+            ring.classList.remove('ring-success', 'ring-danger');
+            if (accuracyPct >= 80) ring.classList.add('ring-success');
+            else if (accuracyPct < 60 && data.overall.total_questions > 0) ring.classList.add('ring-danger');
+        }
         document.getElementById('streak').textContent = data.overall.streak_days + ' days';
         document.getElementById('studyTime').textContent = data.overall.study_minutes + ' min';
         

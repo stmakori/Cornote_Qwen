@@ -120,6 +120,12 @@ LOGIN_URL = '/users/login/'
 LOGIN_REDIRECT_URL = '/notebooks/'
 LOGOUT_REDIRECT_URL = '/users/login/'
 
+# Password reset emails. Console backend prints them to the runserver log
+# instead of sending real mail - fine for a hackathon demo, swap for a real
+# backend (SMTP/SES/etc.) before this ever goes to production.
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@cornote.local')
+
 SESSION_COOKIE_AGE = 86400 * 30  # 30 days
 
 MAX_PDF_SIZE_MB = config('MAX_PDF_SIZE_MB', default=50, cast=int)

@@ -107,6 +107,13 @@
         if (!target) return;
         const id = target.id || '';
         if (id.startsWith('save-ind-')) {
+          // Answer widgets that need several clicks on the same question
+          // (multi-select, matching, ordering) set this flag before saving
+          // so a single click doesn't whisk the student to the next question.
+          if (window.__cornoteSkipAutoAdvance) {
+            window.__cornoteSkipAutoAdvance = false;
+            return;
+          }
           const pk = id.replace('save-ind-', '');
           const block = document.getElementById('question-' + pk);
           if (!block) return;

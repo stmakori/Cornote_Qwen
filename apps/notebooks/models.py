@@ -141,6 +141,10 @@ class Question(models.Model):
     
     question_text = models.TextField()
     question_type = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES, default=QUESTION_TYPE_SHORT_ANSWER)
+    is_math = models.BooleanField(
+        default=False,
+        help_text='Question text/answer contain LaTeX math - render with KaTeX and grade symbolically.',
+    )
     expected_answer = models.TextField(blank=True)
     expected_keywords = models.JSONField(default=list)
     
@@ -535,6 +539,36 @@ class Assignment(models.Model):
         return self.title
 
 
+class AssignmentSubmission(models.Model):
+    """One student's answer to one question within an assignment.
+
+    Answer is a OneToOneField(Question) - exactly one answer per question,
+    globally - which works for a student practicing their own generated
+    questions but can't represent multiple students each answering the same
+    assigned question. This is that per-(assignment, student, question) slot.
+    """
+    assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE, related_name='submissions')
+    student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='assignment_submissions')
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name='assignment_submissions')
+
+    user_answer = models.TextField(blank=True)
+    grade = models.CharField(max_length=20, choices=Answer.GRADE_CHOICES, default=Answer.GRADE_UNGRADED, db_index=True)
+    feedback = models.TextField(blank=True)
+    graded_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('assignment', 'student', 'question')
+        indexes = [
+            models.Index(fields=['assignment', 'student']),
+        ]
+
+    def __str__(self):
+        return f'{self.student.username} - {self.assignment.title} - Q{self.question_id}'
+
+
 class ClassStatistics(models.Model):
     """Aggregate statistics for a class"""
     student_class = models.OneToOneField(StudentClass, on_delete=models.CASCADE, related_name='statistics')
@@ -620,6 +654,35 @@ class LearningPath(models.Model):
     
     def __str__(self):
         return f'Path for {self.notebook.title}'
+
+
+# ════════════════════════════════════════════════════════════
+# FEATURE 15: AI TUTOR CHAT
+# ════════════════════════════════════════════════════════════
+
+class NotebookChatMessage(models.Model):
+    """One turn in a per-user, per-notebook AI tutor conversation."""
+    ROLE_USER = 'user'
+    ROLE_ASSISTANT = 'assistant'
+    ROLE_CHOICES = [
+        (ROLE_USER, 'User'),
+        (ROLE_ASSISTANT, 'Assistant'),
+    ]
+
+    notebook = models.ForeignKey(Notebook, on_delete=models.CASCADE, related_name='chat_messages')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notebook_chat_messages')
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['notebook', 'user', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.role}: {self.content[:50]}'
 
 
 # ════════════════════════════════════════════════════════════

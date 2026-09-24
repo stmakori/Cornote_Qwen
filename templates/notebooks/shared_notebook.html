@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% load notebooks_extras %}
+{% block title %}{{ notebook.title }} (shared) | Cornote{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4 py-4" style="max-width:820px;margin:0 auto;">
+
+  <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
+    <div>
+      <span class="badge bg-secondary mb-2"><i class="bi bi-eye me-1"></i>Shared read-only view</span>
+      <h1 class="h4 fw-bold mb-0">{{ notebook.title }}</h1>
+      <p class="text-muted small mb-0">Shared by {{ notebook.user.username }}</p>
+    </div>
+    {% if user.is_authenticated %}
+    <a href="{% url 'notebooks:dashboard' %}" class="btn btn-ghost btn-sm">
+      <i class="bi bi-arrow-left me-1"></i>My Notebooks
+    </a>
+    {% endif %}
+  </div>
+
+  {% if notebook.notes_content %}
+  <div class="cornote-card p-4 mb-4">
+    <h2 class="h6 fw-semibold mb-3"><i class="bi bi-file-text me-2 text-accent"></i>Notes</h2>
+    <div class="notes-render">{{ notebook.notes_content|notes_flow }}</div>
+  </div>
+  {% endif %}
+
+  <div class="cornote-card p-4">
+    <h2 class="h6 fw-semibold mb-3"><i class="bi bi-question-circle me-2 text-accent"></i>Study Questions</h2>
+    {% for question in questions %}
+    <div class="mb-4 pb-3{% if not forloop.last %} border-bottom{% endif %}" style="border-color:var(--bg-border) !important;">
+      <p class="fw-semibold mb-1">Q{{ question.order_index }}. {{ question.question_text }}</p>
+      {% if question.question_type == 'multiple_choice' or question.question_type == 'multiple_select' %}
+        <ul class="text-muted small mb-2">
+          {% for choice in question.choices %}<li>{{ choice }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+      <p class="small text-success mb-0"><i class="bi bi-check-circle me-1"></i>{{ question.expected_answer }}</p>
+    </div>
+    {% empty %}
+    <p class="text-muted small mb-0">No questions in this notebook yet.</p>
+    {% endfor %}
+  </div>
+
+  <p class="text-muted small text-center mt-4">
+    <i class="bi bi-info-circle me-1"></i>This is a read-only view - answering, grading, and hints are only available to the notebook's owner.
+  </p>
+</div>
+{% endblock %}

@@ -86,9 +86,9 @@ async function loadAchievements() {
             return;
         }
 
-        data.badges.forEach(badge => {
+        data.badges.forEach((badge, i) => {
             const badgeHTML = `
-                <div class="col-md-4 col-lg-3 mb-4">
+                <div class="col-md-4 col-lg-3 mb-4" style="animation: popIn .45s var(--ease-spring) ${Math.min(i, 12) * 60}ms both;">
                     <div class="cornote-card h-100 text-center badge-card" style="border-left: 4px solid ${badge.color};">
                         <div class="p-4">
                             <i class="bi ${badge.icon} fs-1" style="color: ${badge.color};"></i>
@@ -116,10 +116,35 @@ async function checkNewAchievements() {
         const data = await response.json();
         if (data.new_badges_earned > 0) {
             loadAchievements();
+            celebrateNewBadges(data.badges);
         }
     } catch (error) {
         console.error('Error checking achievements:', error);
     }
+}
+
+// Fire one achievement toast per newly earned badge (staggered). The check endpoint
+// already returns the new badges; fall back to the full list only if it didn't.
+async function celebrateNewBadges(newBadges) {
+    if (typeof window.cornoteToast !== 'function') return;
+    let badges = Array.isArray(newBadges) ? newBadges : [];
+    if (badges.length === 0) {
+        try {
+            const r = await fetch('/notebooks/api/achievements/');
+            const d = await r.json();
+            badges = (d.badges || []).slice(-1); // most recent as a best-effort fallback
+        } catch (e) { return; }
+    }
+    badges.slice(0, 4).forEach((badge, i) => {
+        setTimeout(() => {
+            window.cornoteToast({
+                title: `Badge earned: ${badge.name}`,
+                subtitle: badge.description || 'Keep up the great work!',
+                icon: badge.icon,
+                variant: 'success',
+            });
+        }, i * 450);
+    });
 }
 </script>
 

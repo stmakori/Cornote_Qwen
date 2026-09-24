@@ -1,0 +1,83 @@
+{% load notebooks_extras %}
+{% with qtype=question.question_type saved=answer.user_answer|default:'' prefix=id_prefix|default:'answer-raw' %}
+<textarea
+  class="answer-input w-100{% if extra_input_class %} {{ extra_input_class }}{% endif %}{% if qtype != 'short_answer' and qtype != 'fill_blank' %} d-none{% endif %}"
+  name="user_answer"
+  id="{{ prefix }}-{{ question.pk }}"
+  placeholder="Your answer…"
+  rows="{% if qtype == 'fill_blank' %}1{% else %}4{% endif %}"
+  data-qtype="{{ qtype }}"
+  {% if not readonly and autosave %}
+  hx-post="{% if save_url %}{{ save_url }}{% else %}{% url 'notebooks:save_answer' question.pk %}{% endif %}"
+  hx-trigger="keyup changed delay:1200ms, change"
+  hx-target="#save-ind-{{ question.pk }}"
+  hx-swap="innerHTML"
+  {% elif readonly %}disabled{% endif %}
+  {% if not readonly %}oninput="typeof markAnswered === 'function' && markAnswered({{ question.pk }})"{% endif %}
+>{{ saved }}</textarea>
+
+{% if qtype == 'true_false' %}
+<div class="tf-toggle" data-pk="{{ question.pk }}" data-saved="{{ saved }}" data-input-prefix="{{ prefix }}"{% if readonly %} data-readonly="1"{% endif %}>
+  <button type="button" class="tf-toggle-btn" data-value="True"{% if readonly %} disabled{% endif %}>
+    <i class="bi bi-check-lg"></i>True
+  </button>
+  <button type="button" class="tf-toggle-btn" data-value="False"{% if readonly %} disabled{% endif %}>
+    <i class="bi bi-x-lg"></i>False
+  </button>
+</div>
+
+{% elif qtype == 'multiple_choice' %}
+<div class="choice-list" data-pk="{{ question.pk }}" data-mode="single" data-saved="{{ saved }}" data-input-prefix="{{ prefix }}"{% if readonly %} data-readonly="1"{% endif %}>
+  {% for choice in question.choices %}
+  <button type="button" class="choice-card" data-value="{{ choice }}"{% if readonly %} disabled{% endif %}>
+    <span class="choice-key">{{ forloop.counter }}</span>
+    <span class="choice-text">{{ choice }}</span>
+    <span class="choice-check"></span>
+  </button>
+  {% endfor %}
+</div>
+
+{% elif qtype == 'multiple_select' %}
+<div class="choice-list" data-pk="{{ question.pk }}" data-mode="multi" data-saved="{{ saved }}" data-input-prefix="{{ prefix }}"{% if readonly %} data-readonly="1"{% endif %}>
+  {% for choice in question.choices %}
+  <button type="button" class="choice-card multi" data-value="{{ choice }}"{% if readonly %} disabled{% endif %}>
+    <span class="choice-key">{{ forloop.counter }}</span>
+    <span class="choice-text">{{ choice }}</span>
+    <span class="choice-check"></span>
+  </button>
+  {% endfor %}
+</div>
+
+{% elif qtype == 'ordering' %}
+<ol class="order-list{% if readonly %} locked{% endif %}"
+    data-pk="{{ question.pk }}"
+    data-items="{{ question.correct_order|to_json }}"
+    data-saved="{{ saved }}"
+    data-input-prefix="{{ prefix }}"
+    {% if readonly %}data-readonly="1"{% endif %}></ol>
+
+{% elif qtype == 'matching' %}
+<div class="match-pair{% if readonly %} locked{% endif %}"
+     data-pk="{{ question.pk }}"
+     data-pairs="{{ question.matching_pairs|to_json }}"
+     data-saved="{{ saved }}"
+     data-input-prefix="{{ prefix }}"
+     {% if readonly %}data-readonly="1"{% endif %}>
+  <div class="match-pair-col match-pair-col-left"></div>
+  <div class="match-pair-col match-pair-col-right"></div>
+</div>
+{% endif %}
+
+{% if not readonly and show_hint %}
+<div class="hint-wrap mt-2">
+  <button type="button"
+          class="hint-btn"
+          hx-post="{% url 'notebooks:get_hint' question.pk %}"
+          hx-vals='{"level": 1}'
+          hx-target="closest .hint-wrap"
+          hx-swap="innerHTML">
+    <i class="bi bi-lightbulb"></i>Hint
+  </button>
+</div>
+{% endif %}
+{% endwith %}

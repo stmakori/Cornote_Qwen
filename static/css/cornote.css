@@ -11,6 +11,7 @@
   --bg-border:     #475569;
   --text-primary:  #f1f5f9;
   --text-muted:    #94a3b8;
+  --text-secondary: #cbd5e1;
   /* Educational colors */
   --primary:       #2563eb;
   --primary-hover: #1d4ed8;
@@ -30,6 +31,21 @@
   --toolbar-h:     52px;
   --summary-h:     260px; /* legacy; collapsible summary uses max-height instead */
   --notebook-toolbar-min: 48px;
+
+  /* ── Glow / glass layer (UI revamp) ── */
+  --accent-glow:        rgba(245, 158, 11, 0.35);   /* from --accent  #f59e0b */
+  --primary-glow:       rgba(37, 99, 235, 0.35);    /* from --primary #2563eb */
+  --success-glow:       rgba(16, 185, 129, 0.35);   /* from --success #10b981 */
+  --danger-glow:        rgba(239, 68, 68, 0.35);    /* from --danger  #ef4444 */
+  --bg-glass:           rgba(30, 41, 59, 0.72);     /* --bg-surface @ 72%, pair with backdrop-filter */
+  --bg-glass-border:    rgba(255, 255, 255, 0.08);
+  --bg-glow-1:          rgba(37, 99, 235, 0.14);    /* body radial wash, top-left */
+  --bg-glow-2:          rgba(245, 158, 11, 0.07);   /* body radial wash, bottom-right */
+  --shadow-card:        0 1px 2px rgba(0,0,0,.25), 0 8px 24px rgba(0,0,0,.30);
+  --shadow-card-hover:  0 2px 4px rgba(0,0,0,.30), 0 14px 36px rgba(0,0,0,.42),
+                        0 0 0 1px var(--primary-glow), 0 0 28px -8px var(--primary-glow);
+  --ease-spring:        cubic-bezier(.34, 1.56, .64, 1);
+  --ease-out:           cubic-bezier(.4, 0, .2, 1);
 }
 
 /* ── Light theme variable overrides ── */
@@ -40,7 +56,20 @@
   --bg-border:     #cbd5e1;
   --text-primary:  #0f172a;
   --text-muted:    #64748b;
+  --text-secondary: #334155;
   --accent-subtle: rgba(245, 158, 11, 0.15);
+
+  --accent-glow:        rgba(217, 119, 6, 0.28);
+  --primary-glow:       rgba(37, 99, 235, 0.22);
+  --success-glow:       rgba(5, 150, 105, 0.25);
+  --danger-glow:        rgba(220, 38, 38, 0.25);
+  --bg-glass:           rgba(255, 255, 255, 0.72);
+  --bg-glass-border:    rgba(15, 23, 42, 0.08);
+  --bg-glow-1:          rgba(37, 99, 235, 0.08);
+  --bg-glow-2:          rgba(245, 158, 11, 0.06);
+  --shadow-card:        0 1px 2px rgba(15,23,42,.06), 0 8px 24px rgba(15,23,42,.08);
+  --shadow-card-hover:  0 2px 4px rgba(15,23,42,.08), 0 14px 36px rgba(15,23,42,.12),
+                        0 0 0 1px var(--primary-glow), 0 0 28px -8px var(--primary-glow);
 }
 [data-bs-theme="light"] .cornote-card:hover { border-color: #94a3b8; }
 [data-bs-theme="light"] .btn-ghost:hover { background: var(--bg-elevated); }
@@ -66,6 +95,15 @@ body.cornote-body {
   font-size: 14px;
   line-height: 1.6;
   min-height: 100vh;
+}
+
+/* Subtle premium wash; only visible on pages that don't paint opaque --bg-base panels (dashboard, auth, analytics) */
+body.cornote-body {
+  background-image:
+    radial-gradient(ellipse 70% 45% at 12% -8%,  var(--bg-glow-1), transparent 62%),
+    radial-gradient(ellipse 55% 40% at 100% 108%, var(--bg-glow-2), transparent 62%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
 }
 
 /* ── Colour helpers ── */
@@ -173,15 +211,30 @@ body.cornote-body {
 }
 .cornote-card:hover { border-color: #3a3f52; }
 
-/* ── Auth pages ── */
-.auth-page { background: var(--bg-base); }
+/* ── Auth pages ──
+   .auth-page is transparent so the body's radial glow wash shows behind the card.
+   .auth-card shares the .cornote-card elevation + gradient ring (see "Card elevation" below)
+   but deliberately does NOT lift on hover — it's a form, not a tile. */
+.auth-page { background: transparent; }
 .auth-card {
+  position: relative;
   background: var(--bg-surface);
   border: 1px solid var(--bg-border);
   border-radius: var(--radius-lg);
   padding: 2.5rem;
   width: 100%;
   max-width: 400px;
+  box-shadow: var(--shadow-card);
+  transition: box-shadow .3s var(--ease-out), border-color .2s;
+  animation: slideUp .45s var(--ease-out) both;
+}
+.auth-card:hover { border-color: #3a3f52; }
+[data-bs-theme="light"] .auth-card:hover { border-color: #94a3b8; }
+/* Brand mark: gentle spring-in + soft glow. Light touch — this is a sign-in page. */
+.auth-brand-icon {
+  display: inline-block;
+  filter: drop-shadow(0 0 14px var(--accent-glow));
+  animation: popIn .5s var(--ease-spring) .1s both;
 }
 
 /* ── Form controls ── */
@@ -1161,6 +1214,227 @@ audio {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
+/* ── Card elevation: layered shadow + gradient-tinted border glow (layers on the hover rule above) ── */
+.cornote-card {
+  position: relative;
+  box-shadow: var(--shadow-card);
+}
+.cornote-card::after,
+.auth-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;                                   /* = border width; ring drawn in the padding box */
+  background: linear-gradient(135deg, var(--primary-glow) 0%, transparent 45%, var(--accent-glow) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  opacity: 0;
+  transition: opacity .3s var(--ease-out);
+  pointer-events: none;
+}
+.cornote-card:hover,
+.auth-card:hover               { box-shadow: var(--shadow-card-hover); }
+.cornote-card:hover::after,
+.auth-card:hover::after        { opacity: 1; }
+.cornote-card:focus-within::after,
+.auth-card:focus-within::after { opacity: .6; }
+
+/* ── Glass modifier: nav, modals, cards, toasts ── */
+.glass,
+.cornote-card.glass,
+.cornote-nav.glass,
+.notebook-toolbar.glass,
+.modal-content.glass {
+  background: var(--bg-glass);
+  border-color: var(--bg-glass-border);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+          backdrop-filter: blur(14px) saturate(140%);
+}
+.cornote-nav.glass       { border-bottom-color: var(--bg-glass-border); }
+.notebook-toolbar.glass  { border-bottom-color: var(--bg-glass-border); }
+.modal-content.glass     { border: 1px solid var(--bg-glass-border); box-shadow: var(--shadow-card-hover); }
+/* Fallback when backdrop-filter is unsupported: go opaque so text stays readable */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass, .cornote-card.glass, .cornote-nav.glass, .notebook-toolbar.glass, .modal-content.glass {
+    background: var(--bg-surface);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   AI SUMMARY / AUDIO SUMMARY PANEL (partials/notes_summary.html,
+   partials/audio_summary.html). Glass reader, soft action pills,
+   framed native <audio>, token-coloured notes. The partial's JS
+   swaps #audio-summary-container's className, so every framed
+   style lives on INNER wrappers (.audio-frame), never the container.
+════════════════════════════════════════════════════════════ */
+
+/* Glass reader box for the markdown summary */
+.summary-glass {
+  position: relative;
+  background: var(--bg-glass);
+  border: 1px solid var(--bg-glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255,255,255,.04);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+          backdrop-filter: blur(14px) saturate(140%);
+}
+.summary-reader {
+  line-height: 1.8;
+  font-size: .88rem;
+  max-height: 400px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* Action row: soft pills instead of raw Bootstrap outlines */
+.summary-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.summary-actions .btn {
+  border-radius: 999px;
+  font-size: .8rem;
+  font-weight: 500;
+  padding: .38rem .9rem;
+  line-height: 1.25;
+}
+.btn-soft {
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-border);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  transition: color .15s, border-color .15s, box-shadow .2s, transform .1s;
+}
+.btn-soft:hover,
+.btn-soft:focus-visible {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-color: var(--primary);
+  box-shadow: 0 0 16px -6px var(--primary-glow);
+}
+.btn-soft-accent {
+  background: var(--accent-subtle);
+  border: 1px solid transparent;
+  color: var(--accent);
+  border-radius: var(--radius-sm);
+  transition: color .15s, border-color .15s, box-shadow .2s, transform .1s;
+}
+.btn-soft-accent:hover,
+.btn-soft-accent:focus-visible {
+  background: var(--accent-subtle);
+  color: var(--accent-hover);
+  border-color: var(--accent);
+  box-shadow: 0 0 18px -6px var(--accent-glow);
+}
+.btn-soft-accent:disabled { opacity: .85; }   /* keeps the waveform legible while generating */
+.btn-soft-danger {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  border-radius: var(--radius-sm);
+  transition: background .15s, box-shadow .2s;
+}
+.btn-soft-danger:hover,
+.btn-soft-danger:focus-visible {
+  background: rgba(239, 68, 68, .12);
+  color: var(--danger);
+  box-shadow: 0 0 16px -6px var(--danger-glow);
+}
+.btn-soft:disabled, .btn-soft-danger:disabled { opacity: .45; box-shadow: none; }
+
+/* Framed native <audio>: card-like glass panel, controls chrome left native */
+.audio-frame {
+  position: relative;
+  padding: .85rem 1rem 1rem;
+  background: var(--bg-glass);
+  border: 1px solid var(--bg-glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255,255,255,.04);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+          backdrop-filter: blur(14px) saturate(140%);
+  transition: box-shadow .3s var(--ease-out), border-color .2s;
+}
+.audio-frame:hover,
+.audio-frame:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-card), 0 0 0 1px var(--accent-glow), 0 0 24px -8px var(--accent-glow);
+}
+.audio-frame-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-bottom: .6rem;
+}
+.audio-frame-title {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.audio-frame-title i { color: var(--accent); font-size: .95rem; }
+.audio-frame audio {
+  display: block;
+  width: 100%;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  outline-offset: 2px;
+  /* Hint the UA to draw its native controls in the active theme — not a reskin */
+  color-scheme: dark;
+}
+[data-bs-theme="light"] .audio-frame audio { color-scheme: light; }
+.audio-frame .audio-frame-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-top: .65rem;
+}
+.audio-frame .audio-frame-foot .btn { border-radius: 999px; font-size: .78rem; padding: .3rem .8rem; }
+.audio-frame-status { font-size: .78rem; color: var(--text-muted); }
+
+/* Notes (replaces alert-warning/-danger/-success in this panel). Keep .alert on the
+   element so Bootstrap's data-bs-dismiss still works; we only recolour via its vars. */
+.alert.audio-note {
+  --bs-alert-bg: var(--bg-elevated);
+  --bs-alert-border-color: var(--bg-border);
+  --bs-alert-color: var(--text-primary);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 3px 0 12px -8px var(--primary-glow);
+  animation: slideUp .35s ease-out;
+}
+.alert.audio-note.warning {
+  --bs-alert-bg: var(--accent-subtle);
+  --bs-alert-border-color: transparent;
+  border-left-color: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 3px 0 12px -8px var(--accent-glow);
+}
+.alert.audio-note.danger {
+  --bs-alert-bg: rgba(239, 68, 68, .10);
+  --bs-alert-border-color: transparent;
+  border-left-color: var(--danger);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 3px 0 12px -8px var(--danger-glow);
+}
+.alert.audio-note.success {
+  --bs-alert-bg: rgba(16, 185, 129, .10);
+  --bs-alert-border-color: transparent;
+  border-left-color: var(--success);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 3px 0 12px -8px var(--success-glow);
+}
+.alert.audio-note .btn-close { filter: invert(1) grayscale(1) brightness(1.6); opacity: .6; }
+[data-bs-theme="light"] .alert.audio-note .btn-close { filter: none; }
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .summary-glass, .audio-frame { background: var(--bg-surface); }
+}
+
 /* ── Grade badge colors with animation ── */
 .grade-badge.badge-correct {
   background: var(--success);
@@ -1180,11 +1454,580 @@ audio {
   animation: slideInRight 0.3s ease-out;
 }
 
+/* ── Grade feedback motion: pop for correct, pulse for partial, shake for incorrect.
+      gradePop = slideInRight + scale + glow ring; partial/incorrect chain the existing
+      slideInRight/pulse keyframes. Both new keyframes are transform/box-shadow only. ── */
+@keyframes gradePop {
+  0%   { opacity: 0; transform: translateX(20px) scale(.6); box-shadow: 0 0 0 0 var(--success-glow); }
+  55%  { opacity: 1; transform: translateX(0)    scale(1.12); box-shadow: 0 0 0 8px var(--success-glow); }
+  100% { opacity: 1; transform: none;                        box-shadow: 0 0 0 0 rgba(0,0,0,0); }
+}
+@keyframes gradeShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
+.grade-badge.badge-correct   { animation: gradePop .5s var(--ease-spring) both; }
+.grade-badge.badge-partial   { animation: slideInRight .3s ease-out, pulse 1.2s ease-in-out .3s 2; }
+.grade-badge.badge-incorrect { animation: slideInRight .3s ease-out, gradeShake .4s ease-in-out .3s; }
+
+/* ════════════════════════════════════════════════════════════
+   INTERACTIVE ANSWER WIDGETS & FEEDBACK (UI revamp)
+   All colours via tokens → work in dark + light. Motion is
+   neutralised in the reduced-motion block further down.
+════════════════════════════════════════════════════════════ */
+
+/* Shared micro-keyframes */
+@keyframes popIn {
+  0%   { transform: scale(.5); opacity: 0; }
+  60%  { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+/* ── Choice cards (multiple choice = radio behaviour, multiple select = add .multi) ──
+   <div class="choice-list">
+     <button type="button" class="choice-card [multi] [selected]">
+       <span class="choice-key">A</span><span class="choice-text">…</span><span class="choice-check"></span>
+     </button>
+   </div> */
+.choice-list { display: flex; flex-direction: column; gap: .5rem; }
+.choice-card {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  width: 100%;
+  text-align: left;
+  padding: .7rem .9rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: .84rem;
+  line-height: 1.5;
+  font-family: inherit;
+  cursor: pointer;
+  position: relative;
+  transition: border-color .15s, background .15s, box-shadow .15s, transform .15s;
+}
+.choice-card:hover {
+  border-color: var(--primary);
+  background: var(--bg-surface);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px -6px var(--primary-glow);
+}
+.choice-key {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  font-weight: 700;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg-surface);
+  border: 1px solid var(--bg-border);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.choice-text { flex: 1; min-width: 0; }
+.choice-check {                                   /* checkmark slot; empty span gets a ✓ via ::before, or drop an <i> inside */
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--bg-border);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: .7rem;
+  line-height: 1;
+  color: transparent;
+  flex-shrink: 0;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.choice-card.multi .choice-check { border-radius: var(--radius-sm); }
+.choice-check:empty::before { content: '✓'; }
+.choice-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 18px -6px var(--accent-glow);
+}
+.choice-card.selected .choice-key   { background: var(--accent); border-color: var(--accent); color: #fff; }
+.choice-card.selected .choice-check { background: var(--accent); border-color: var(--accent); color: #fff; animation: popIn .25s var(--ease-spring); }
+/* Read-only (grade_results) + optional reveal states */
+.choice-card:disabled,
+.choice-card[aria-disabled="true"] { cursor: default; opacity: .85; }
+.choice-card:disabled:hover,
+.choice-card[aria-disabled="true"]:hover { transform: none; box-shadow: none; border-color: var(--bg-border); background: var(--bg-elevated); }
+.choice-card.selected:disabled:hover { border-color: var(--accent); background: var(--accent-subtle); box-shadow: 0 0 0 1px var(--accent); }
+.choice-card.is-correct   { border-color: var(--success); background: rgba(16,185,129,.10); }
+.choice-card.is-incorrect { border-color: var(--danger);  background: rgba(239,68,68,.08); }
+
+/* ── True / False two-segment toggle ──
+   <div class="tf-toggle" role="radiogroup">
+     <button type="button" class="tf-toggle-btn [selected]" data-value="True">✓ True</button>
+     <button type="button" class="tf-toggle-btn [selected]" data-value="False">✗ False</button>
+   </div> */
+.tf-toggle {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  width: 100%;
+  max-width: 320px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-border);
+  border-radius: 99px;
+}
+.tf-toggle-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: .55rem 1rem;
+  border-radius: 99px;
+  font-weight: 600;
+  font-size: .82rem;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+  transition: background .18s, color .18s, box-shadow .18s;
+}
+.tf-toggle-btn:hover { color: var(--text-primary); background: var(--bg-surface); }
+.tf-toggle-btn.selected {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 0 16px -4px var(--primary-glow);
+}
+.tf-toggle-btn:disabled { cursor: default; }
+.tf-toggle-btn:disabled:not(.selected):hover { background: transparent; color: var(--text-muted); }
+
+/* ── Ordering: native HTML5 drag-and-drop rows ──
+   <ol class="order-list">
+     <li class="order-item" draggable="true">
+       <span class="order-handle" aria-hidden="true"></span><span class="order-index">1</span>
+       <span class="order-text">…</span>
+       <span class="order-move"><button class="order-move-btn">▲</button><button class="order-move-btn">▼</button></span>
+     </li>
+   </ol>
+   JS toggles .dragging on the source row and .drag-over on the hovered row. */
+.order-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
+.order-item {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  padding: .6rem .75rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: .84rem;
+  line-height: 1.5;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: border-color .15s, box-shadow .15s, transform .15s, background .15s, opacity .15s;
+}
+.order-item:hover  { border-color: var(--primary); box-shadow: 0 4px 14px -6px var(--primary-glow); }
+.order-item:active { cursor: grabbing; }
+.order-handle {
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  letter-spacing: -2px;
+  flex-shrink: 0;
+  cursor: grab;
+}
+.order-handle:empty::before { content: '⋮⋮'; }
+.order-index {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  font-weight: 700;
+  color: var(--primary);
+  min-width: 1.4em;
+  text-align: center;
+}
+.order-text { flex: 1; min-width: 0; }
+.order-move { display: inline-flex; flex-direction: column; gap: 2px; margin-left: auto; }
+.order-move-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: .6rem;
+  line-height: 1;
+  padding: .15rem .35rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.order-move-btn:hover { background: var(--bg-surface); color: var(--text-primary); }
+.order-item.dragging {
+  opacity: .45;
+  transform: scale(.98);
+  border-style: dashed;
+  box-shadow: none;
+}
+.order-item.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 18px -6px var(--accent-glow);
+}
+.order-list.locked .order-item { cursor: default; }
+.order-list.locked .order-item:hover { border-color: var(--bg-border); box-shadow: none; }
+.order-list.locked .order-move, .order-list.locked .order-handle { display: none; }
+
+/* ── Matching: click-to-connect two-column pairs ──
+   <div class="match-pair">
+     <div class="match-pair-col"> <button class="match-pair-item [selected|matched]" data-pair="1">…</button> … </div>
+     <div class="match-pair-col"> … </div>
+   </div>
+   .selected = armed (first click), .matched + data-pair="N" = paired; the N chip + accent stub identify the pair. */
+.match-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .5rem 1.5rem;
+  position: relative;
+}
+.match-pair-col { display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
+.match-pair-item {
+  width: 100%;
+  text-align: left;
+  padding: .6rem .8rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--bg-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: .82rem;
+  line-height: 1.45;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex; align-items: center; gap: .6rem;
+  position: relative;
+  transition: border-color .15s, background .15s, box-shadow .15s, transform .15s;
+}
+.match-pair-item:hover { border-color: var(--primary); transform: translateY(-1px); }
+.match-pair-item.selected {
+  border-color: var(--primary);
+  background: rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 1px var(--primary), 0 0 18px -6px var(--primary-glow);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.match-pair-item.matched {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  animation: none;
+}
+.match-pair-item.matched::after {                 /* pair number chip */
+  content: attr(data-pair);
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: .62rem;
+  font-weight: 700;
+  min-width: 1.6em; height: 1.6em;
+  padding: 0 .4em;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  animation: popIn .25s var(--ease-spring);
+}
+.match-pair-item.matched::before {                /* accent connector stub pointing into the gutter */
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: .75rem;
+  height: 2px;
+  background: var(--accent);
+  transform: translateY(-50%);
+}
+.match-pair-col:first-child .match-pair-item.matched::before { right: calc(-.75rem - 1px); }
+.match-pair-col:last-child  .match-pair-item.matched::before { left:  calc(-.75rem - 1px); }
+.match-pair.locked .match-pair-item { cursor: default; }
+.match-pair.locked .match-pair-item:hover { transform: none; border-color: var(--bg-border); }
+.match-pair.locked .match-pair-item.matched:hover { border-color: var(--accent); }
+@media (max-width: 480px) {
+  .match-pair { grid-template-columns: 1fr; gap: .5rem; }
+  .match-pair-item.matched::before { display: none; }
+}
+
+/* ── Ordering on touch devices: native HTML5 drag-and-drop doesn't work on
+      most touchscreens, so the ▲/▼ buttons are the real reordering control
+      there, not a fallback - give them a proper tap target and drop the
+      drag-handle affordance so it doesn't look draggable when it isn't. ── */
+@media (pointer: coarse) {
+  .order-handle { display: none; }
+  .order-move-btn {
+    padding: .5rem .65rem;
+    font-size: .8rem;
+  }
+  .order-item { cursor: default; }
+}
+
+/* ── Hints: ghost button + inset note panel (progressive disclosure) ──
+   <button class="hint-btn">💡 Hint <span class="hint-count">1/2</span></button>
+   <div class="hint-panel [level-2]"><div class="hint-panel-label">Hint 1</div>…</div> */
+.hint-btn {
+  display: inline-flex; align-items: center; gap: .35rem;
+  background: transparent;
+  border: 1px dashed var(--bg-border);
+  color: var(--text-muted);
+  border-radius: 99px;
+  padding: .3rem .75rem;
+  font-size: .74rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s, box-shadow .15s;
+}
+.hint-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  box-shadow: 0 0 14px -6px var(--accent-glow);
+}
+.hint-btn:disabled { opacity: .5; cursor: default; box-shadow: none; }
+.hint-btn .hint-count { font-family: var(--font-mono); font-size: .66rem; opacity: .75; }
+.hint-btn .htmx-indicator { margin-left: .2rem; }
+.hint-panel {
+  margin-top: .6rem;
+  padding: .7rem .9rem .7rem 1rem;
+  background: var(--bg-elevated);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 3px 0 12px -8px var(--accent-glow);
+  font-size: .8rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+  animation: slideUp .35s ease-out;
+}
+.hint-panel + .hint-panel { margin-top: .4rem; }
+.hint-panel-label {
+  font-family: var(--font-mono);
+  font-size: .62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--accent);
+  margin-bottom: .25rem;
+}
+.hint-panel.level-2 { border-left-color: var(--primary); box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 3px 0 12px -8px var(--primary-glow); }
+.hint-panel.level-2 .hint-panel-label { color: var(--primary); }
+.hint-panel .hint-btn { margin-top: .5rem; }
+
+/* ── Achievement toasts ──
+   <div class="toast-stack" id="toastStack" aria-live="polite"></div>   (once, in base.html)
+   <div class="toast-achievement [variant-success|variant-primary]" style="--toast-duration: 5s">
+     <div class="toast-badge">🏅</div>
+     <div><div class="toast-title">Badge earned</div><div class="toast-subtitle">…</div></div>
+     <button class="toast-close" aria-label="Dismiss">×</button>
+     <div class="toast-progress"></div>
+   </div>
+   JS: add .leaving, then remove the node after 300ms via setTimeout (NOT animationend — see reduced motion). */
+.toast-stack {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 1090;                                  /* above Bootstrap modal (1055) */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: .6rem;
+  width: min(360px, calc(100vw - 2rem));
+  pointer-events: none;
+}
+.toast-achievement {
+  pointer-events: auto;
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: .8rem;
+  align-items: center;
+  width: 100%;
+  padding: .85rem 1rem;
+  background: var(--bg-glass);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+          backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid var(--bg-glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgba(0,0,0,.35), 0 0 0 1px var(--accent-glow), 0 0 32px -8px var(--accent-glow);
+  color: var(--text-primary);
+  animation: slideInRight .45s var(--ease-spring) both;
+}
+.toast-achievement.leaving { animation: toastOut .3s ease-in forwards; }
+@keyframes toastOut { to { opacity: 0; transform: translateX(40px) scale(.95); } }
+.toast-badge {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 1.35rem;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  box-shadow: 0 0 20px -4px var(--accent-glow);
+  animation: popIn .5s var(--ease-spring) .15s both;
+}
+.toast-title    { font-weight: 700; font-size: .86rem; line-height: 1.3; }
+.toast-subtitle { font-size: .74rem; color: var(--text-muted); line-height: 1.4; }
+.toast-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: .2rem .4rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  align-self: start;
+  transition: background .12s, color .12s;
+}
+.toast-close:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.toast-progress {
+  position: absolute;
+  left: 0; bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--primary));
+  transform-origin: left;
+  animation: toastProgress var(--toast-duration, 5s) linear forwards;
+}
+@keyframes toastProgress { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.toast-achievement.variant-success { box-shadow: 0 12px 32px rgba(0,0,0,.35), 0 0 0 1px var(--success-glow), 0 0 32px -8px var(--success-glow); }
+.toast-achievement.variant-success .toast-badge { background: linear-gradient(135deg, var(--success), var(--success-hover)); box-shadow: 0 0 20px -4px var(--success-glow); }
+.toast-achievement.variant-primary { box-shadow: 0 12px 32px rgba(0,0,0,.35), 0 0 0 1px var(--primary-glow), 0 0 32px -8px var(--primary-glow); }
+.toast-achievement.variant-primary .toast-badge { background: linear-gradient(135deg, var(--primary), var(--primary-hover)); box-shadow: 0 0 20px -4px var(--primary-glow); }
+[data-bs-theme="light"] .toast-achievement { box-shadow: 0 12px 32px rgba(15,23,42,.14), 0 0 0 1px var(--accent-glow), 0 0 32px -8px var(--accent-glow); }
+
+/* ── Progress ring (SVG built by template) ──
+   <div class="progress-ring [ring-success|ring-primary] [ring-sm|ring-lg]" style="--ring-value: 72" role="img" aria-label="72% accuracy">
+     <svg viewBox="0 0 100 100">
+       <circle class="ring-track"    cx="50" cy="50" r="42"/>
+       <circle class="ring-progress" cx="50" cy="50" r="42" pathLength="100"/>
+     </svg>
+     <div class="ring-label">72%<span class="ring-sub">accuracy</span></div>
+   </div>
+   pathLength="100" lets --ring-value be a plain 0-100 number. */
+.progress-ring {
+  --ring-size: 96px;
+  --ring-stroke: 8px;
+  --ring-color: var(--accent);
+  --ring-glow: var(--accent-glow);
+  --ring-value: 0;
+  position: relative;
+  width: var(--ring-size);
+  height: var(--ring-size);
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.progress-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; display: block; }
+.progress-ring .ring-track {
+  fill: none;
+  stroke: var(--bg-border);
+  stroke-width: var(--ring-stroke);
+}
+.progress-ring .ring-progress {
+  fill: none;
+  stroke: var(--ring-color);
+  stroke-width: var(--ring-stroke);
+  stroke-linecap: round;
+  stroke-dasharray: var(--ring-value) 100;
+  filter: drop-shadow(0 0 6px var(--ring-glow));
+  transition: stroke-dasharray .9s var(--ease-out), stroke .3s;
+  animation: ringFill 1s var(--ease-out) both;
+}
+@keyframes ringFill { from { stroke-dasharray: 0 100; } }
+.progress-ring .ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: calc(var(--ring-size) * .22);
+  line-height: 1;
+  color: var(--text-primary);
+  pointer-events: none;
+}
+.progress-ring .ring-sub {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: .6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  margin-top: .3rem;
+}
+.progress-ring.ring-success { --ring-color: var(--success); --ring-glow: var(--success-glow); }
+.progress-ring.ring-primary { --ring-color: var(--primary); --ring-glow: var(--primary-glow); }
+.progress-ring.ring-danger  { --ring-color: var(--danger);  --ring-glow: var(--danger-glow); }
+.progress-ring.ring-sm { --ring-size: 56px;  --ring-stroke: 6px; }
+.progress-ring.ring-sm .ring-sub { display: none; }
+.progress-ring.ring-lg { --ring-size: 140px; --ring-stroke: 10px; }
+
+/* ── 3D flip card (spaced review) ──
+   <div class="flip-card-3d [flipped]" tabindex="0" role="button" aria-pressed="false">
+     <div class="flip-card-3d-inner">
+       <div class="flip-card-3d-front"><span class="flip-face-label">Question</span> … <span class="flip-hint">Click to reveal</span></div>
+       <div class="flip-card-3d-back"><span class="flip-face-label">Answer</span> …</div>
+     </div>
+   </div>
+   Both faces share one grid cell so the card sizes to the taller face — no fixed height needed. */
+.flip-card-3d {
+  perspective: 1200px;
+  width: 100%;
+  min-height: 220px;
+  cursor: pointer;
+  outline-offset: 4px;
+}
+.flip-card-3d-inner {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-height: inherit;
+  transform-style: preserve-3d;
+  transition: transform .6s var(--ease-out);
+}
+.flip-card-3d.flipped .flip-card-3d-inner { transform: rotateY(180deg); }
+.flip-card-3d-front,
+.flip-card-3d-back {
+  grid-area: 1 / 1;
+  min-height: inherit;
+  -webkit-backface-visibility: hidden;
+          backface-visibility: hidden;
+  background: var(--bg-surface);
+  border: 1px solid var(--bg-border);
+  border-radius: var(--radius-lg);
+  padding: 2rem 1.5rem;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center;
+  position: relative;
+  box-shadow: var(--shadow-card);
+  transform: rotateY(0deg);                       /* explicit 0 fixes Safari backface flicker */
+}
+.flip-card-3d-back {
+  transform: rotateY(180deg);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-card), 0 0 0 1px var(--accent-glow), 0 0 28px -8px var(--accent-glow);
+}
+.flip-card-3d:hover .flip-card-3d-front,
+.flip-card-3d:hover .flip-card-3d-back { border-color: var(--primary); }
+.flip-card-3d.flipped:hover .flip-card-3d-back { border-color: var(--accent); }
+.flip-face-label {
+  position: absolute;
+  top: .75rem; left: 1rem;
+  font-family: var(--font-mono);
+  font-size: .62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+}
+.flip-card-3d-back .flip-face-label { color: var(--accent); }
+.flip-hint {
+  position: absolute;
+  bottom: .75rem;
+  font-size: .7rem;
+  color: var(--text-muted);
+  opacity: .8;
+}
+
 /* ════════════════════════════════════════════════════════════
    ACCESSIBILITY & WCAG COMPLIANCE
 ════════════════════════════════════════════════════════════ */
 
-/* ── Reduced motion support ── */
+/* ── Reduced motion support (OS preference) ── */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1194,7 +2037,56 @@ audio {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* Hover/drag transforms are state changes, not motion, but remove them so nothing ever shifts */
+  .cornote-card:hover,
+  .choice-card:hover,
+  .order-item:hover,
+  .order-item.dragging,
+  .match-pair-item:hover,
+  .btn:hover,
+  .feature-card:hover,
+  .card:hover { transform: none !important; }
+  /* Infinite/looping cues become static */
+  .match-pair-item.selected,
+  .timer-phase-badge,
+  .timer-stat span.warning { animation: none !important; }
+  /* Auto-dismiss bar would jump to 0 instantly; hide it (JS dismisses via setTimeout regardless) */
+  .toast-progress { display: none !important; }
+  /* Flip becomes an instant swap; keep glow ring static */
+  .flip-card-3d-inner { transition: none !important; }
+  .progress-ring .ring-progress { animation: none !important; filter: none !important; }
+  .cornote-card::after,
+  .auth-card::after { transition: none !important; }
+  .audio-waveform span { animation: none !important; transform: none !important; opacity: 1 !important; }
+  body.cornote-body { background-attachment: scroll; }
 }
+
+/* ── Same kill-switch driven by UserPreferences.reduce_animations:
+      template pass adds class="reduce-animations" to <body> when the pref is true ── */
+body.reduce-animations,
+body.reduce-animations *,
+body.reduce-animations *::before,
+body.reduce-animations *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+body.reduce-animations .cornote-card:hover,
+body.reduce-animations .choice-card:hover,
+body.reduce-animations .order-item:hover,
+body.reduce-animations .order-item.dragging,
+body.reduce-animations .match-pair-item:hover,
+body.reduce-animations .btn:hover,
+body.reduce-animations .feature-card:hover,
+body.reduce-animations .card:hover { transform: none !important; }
+body.reduce-animations .match-pair-item.selected,
+body.reduce-animations .timer-phase-badge,
+body.reduce-animations .timer-stat span.warning,
+body.reduce-animations .progress-ring .ring-progress { animation: none !important; }
+body.reduce-animations .toast-progress { display: none !important; }
+body.reduce-animations .flip-card-3d-inner { transition: none !important; }
+body.reduce-animations .audio-waveform span { animation: none !important; transform: none !important; opacity: 1 !important; }
 
 /* ── Focus visible for keyboard navigation ── */
 :focus-visible {

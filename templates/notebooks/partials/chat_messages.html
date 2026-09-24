@@ -1,0 +1,6 @@
+{% for message in new_messages %}
+{% include 'notebooks/partials/chat_message_bubble.html' with message=message %}
+{% endfor %}
+{% if error %}
+<div class="alert alert-warning small mb-0 py-2">{{ error }}</div>
+{% endif %}

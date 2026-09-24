@@ -106,12 +106,27 @@ class AIServiceMockedTests(TestCase):
         self.assertEqual(out[0]['question_text'], 'What is X?')
 
     @patch.object(ai_service, '_chat')
+    def test_generate_questions_normalizes_is_math_true(self, mock_chat):
+        mock_chat.return_value = (
+            '{"questions":[{"question_text":"Solve $2x+2=4$","expected_answer":"1",'
+            '"is_math":true}]}'
+        )
+        out = ai_service.generate_questions('Some algebra text.')
+        self.assertTrue(out[0]['is_math'])
+
+    @patch.object(ai_service, '_chat')
+    def test_generate_questions_defaults_is_math_false_when_missing(self, mock_chat):
+        mock_chat.return_value = '{"questions":[{"question_text":"What is X?","expected_answer":"X"}]}'
+        out = ai_service.generate_questions('Some course text about X.')
+        self.assertFalse(out[0]['is_math'])
+
+    @patch.object(ai_service, '_chat')
     def test_generate_questions_uses_requested_count(self, mock_chat):
         mock_chat.return_value = '{"questions":[]}'
         with self.assertRaises(ValueError):
             ai_service.generate_questions('Some course text about X.', count=7)
         prompt = mock_chat.call_args.args[0][0]['content']
-        self.assertIn('exactly 7 open-ended study questions', prompt)
+        self.assertIn('exactly 7 questions', prompt)
 
     @patch('apps.notebooks.services.ai_service.Anthropic')
     def test_get_client_uses_anthropic_auth_token(self, mock_anthropic):

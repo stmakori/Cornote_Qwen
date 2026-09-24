@@ -6,10 +6,10 @@ Include in main views.py or use as separate blueprint
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.http import require_POST, require_GET
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, Http404
 from django.contrib import messages
 from django.utils import timezone
-from django.db.models import Avg, Count
+from django.db.models import Avg, Count, Q
 import json
 import io
 
@@ -33,15 +33,82 @@ def preferences_page(request):
     return render(request, 'notebooks/preferences.html')
 
 
+@login_required
+def leaderboard_page(request):
+    """Rank users by answer accuracy (computed live from Answer grades, not
+    the separately-cached StudyAnalytics, which is only refreshed when a user
+    visits their own analytics page and would leave everyone else stale)."""
+    from django.contrib.auth.models import User
+    from .models import Answer, UserAchievement, StudyGroup
+
+    MIN_ANSWERED = 3  # require a small sample so one lucky answer isn't rank #1
+
+    stats = (
+        Answer.objects.exclude(grade=Answer.GRADE_UNGRADED)
+        .values('question__notebook__user')
+        .annotate(
+            total=Count('id'),
+            correct=Count('id', filter=Q(grade=Answer.GRADE_CORRECT)),
+            partial=Count('id', filter=Q(grade=Answer.GRADE_PARTIAL)),
+        )
+    )
+    badge_counts = dict(
+        UserAchievement.objects.values_list('user').annotate(count=Count('id'))
+    )
+    user_ids = [s['question__notebook__user'] for s in stats]
+    users_by_id = {u.pk: u for u in User.objects.filter(pk__in=user_ids)}
+
+    rows = []
+    for s in stats:
+        uid = s['question__notebook__user']
+        user = users_by_id.get(uid)
+        if not user or s['total'] < MIN_ANSWERED:
+            continue
+        accuracy = (s['correct'] + s['partial'] * 0.5) / s['total'] * 100
+        rows.append({
+            'user': user,
+            'accuracy': round(accuracy, 1),
+            'total_answered': s['total'],
+            'badge_count': badge_counts.get(uid, 0),
+            'is_me': user.pk == request.user.pk,
+        })
+    rows.sort(key=lambda r: (-r['accuracy'], -r['badge_count'], -r['total_answered']))
+    for i, row in enumerate(rows, start=1):
+        row['rank'] = i
+
+    my_groups = StudyGroup.objects.filter(members=request.user)
+    group_leaderboards = []
+    for group in my_groups:
+        member_ids = set(group.members.values_list('id', flat=True)) | {group.creator_id}
+        group_rows = [r for r in rows if r['user'].pk in member_ids]
+        if group_rows:
+            group_leaderboards.append({'group': group, 'rows': group_rows[:10]})
+
+    return render(request, 'notebooks/leaderboard.html', {
+        'rows': rows[:25],
+        'my_row': next((r for r in rows if r['is_me']), None),
+        'group_leaderboards': group_leaderboards,
+        'min_answered': MIN_ANSWERED,
+    })
+
+
 # ── Study Groups ──────────────────────────────────────────────
 
 @login_required
 def study_groups_page(request):
     from .models import StudyGroup
-    my_groups = (
-        StudyGroup.objects.filter(members=request.user) |
-        StudyGroup.objects.filter(creator=request.user)
-    ).distinct().annotate(member_count=Count('members'))
+    # NOT .annotate(member_count=Count('members')) here: combining an OR'd
+    # filter()|filter() queryset with .distinct() and a Count() on that same
+    # M2M relation produces wrong (undercounted) results for some groups -
+    # verified empirically. member_count is set below via a plain .count()
+    # per group instead, which is correct and cheap (a user is rarely in more
+    # than a handful of groups).
+    my_groups = list(
+        (StudyGroup.objects.filter(members=request.user) |
+         StudyGroup.objects.filter(creator=request.user)).distinct()
+    )
+    for g in my_groups:
+        g.member_count = g.members.count()
     public_groups = StudyGroup.objects.filter(is_public=True).exclude(
         members=request.user
     ).exclude(creator=request.user).annotate(member_count=Count('members'))[:10]
@@ -147,7 +214,6 @@ def spaced_review_page(request):
         })
     return render(request, 'notebooks/spaced_review.html', {
         'questions': questions,
-        'questions_json': json.dumps(questions),
         'total_due': due_reviews.count(),
     })
 
@@ -161,9 +227,15 @@ def teacher_dashboard_page(request):
     classes = StudentClass.objects.filter(teacher=request.user).annotate(
         student_count=Count('students')
     )
+    # Classes this user is enrolled in as a student (previously joining a class
+    # led nowhere - this page showed nothing for a non-teacher).
+    enrolled_classes = StudentClass.objects.filter(students=request.user).annotate(
+        student_count=Count('students')
+    )
     return render(request, 'notebooks/teacher_dashboard.html', {
         'profile': profile,
         'classes': classes,
+        'enrolled_classes': enrolled_classes,
     })
 
 
@@ -188,34 +260,221 @@ def create_class_view(request):
 
 
 @login_required
+@require_POST
+def create_teacher_question(request):
+    """Hand-author a Question into the teacher's bank notebook so it can be
+    attached to an assignment without uploading a PDF first. Only users who
+    actually run a class may post here - a student can't inject questions."""
+    from django.core.exceptions import PermissionDenied
+    from .models import StudentClass
+    from .services import question_bank
+
+    if not StudentClass.objects.filter(teacher=request.user).exists():
+        raise PermissionDenied('Only teachers with a class can add bank questions.')
+
+    # Send the teacher back to the class page they came from (if it's theirs).
+    class_id = request.POST.get('class_id', '').strip()
+    back = redirect('notebooks:teacher_dashboard_page')
+    if class_id.isdigit() and StudentClass.objects.filter(pk=int(class_id), teacher=request.user).exists():
+        back = redirect('notebooks:teacher_class_detail', class_id=int(class_id))
+
+    try:
+        question = question_bank.create_bank_question(request.user, request.POST)
+    except question_bank.QuestionBankError as exc:
+        messages.error(request, str(exc))
+        return back
+
+    messages.success(
+        request,
+        f'Question added to your bank ({question.get_question_type_display()}). '
+        f'It is now available under "New Assignment".',
+    )
+    return back
+
+
+@login_required
 def teacher_class_detail(request, class_id):
     from .models import StudentClass, Assignment
-    cls = get_object_or_404(StudentClass, id=class_id, teacher=request.user)
+    cls = get_object_or_404(StudentClass, id=class_id)
+    is_teacher = cls.teacher_id == request.user.pk
+    is_student = not is_teacher and cls.students.filter(pk=request.user.pk).exists()
+    if not is_teacher and not is_student:
+        raise Http404()
 
-    if request.method == 'POST' and request.POST.get('action') == 'create_assignment':
+    if is_teacher and request.method == 'POST' and request.POST.get('action') == 'create_assignment':
         title = request.POST.get('title', '').strip()
         description = request.POST.get('description', '').strip()
         due_date = request.POST.get('due_date', '').strip()
+        question_ids = request.POST.getlist('question_ids')
         if title and due_date:
-            Assignment.objects.create(
+            assignment = Assignment.objects.create(
                 student_class=cls,
                 created_by=request.user,
                 title=title,
                 description=description,
                 due_date=due_date,
             )
-            messages.success(request, f'Assignment "{title}" created.')
+            if question_ids:
+                # Only the teacher's own questions can be attached - not an
+                # arbitrary Question pk a crafted request might pass in.
+                own_questions = Question.objects.filter(
+                    pk__in=question_ids, notebook__user=request.user,
+                )
+                assignment.questions.set(own_questions)
+            messages.success(request, f'Assignment "{title}" created with {assignment.questions.count()} question(s).')
         else:
             messages.error(request, 'Title and due date are required.')
         return redirect('notebooks:teacher_class_detail', class_id=class_id)
 
-    assignments = cls.assignments.all()
+    assignments = list(cls.assignments.all())
     students = cls.students.all()
+
+    statistics = None
+    teacher_questions = None
+    manual_question_types = None
+    if is_teacher:
+        from .services.features_service import ClassStatsService
+        from .services.question_bank import MANUAL_QUESTION_TYPES
+        statistics = ClassStatsService.update_class_statistics(cls)
+        teacher_questions = Question.objects.filter(notebook__user=request.user).select_related('notebook').order_by('notebook_id', 'order_index')
+        type_labels = dict(Question.QUESTION_TYPE_CHOICES)
+        manual_question_types = [(t, type_labels[t]) for t in MANUAL_QUESTION_TYPES]
+
+    if is_student:
+        # Annotate progress directly onto each assignment (simpler in the
+        # template than a separate dict keyed by a variable pk).
+        for assignment in assignments:
+            assignment.my_total = assignment.questions.count()
+            assignment.my_graded = AssignmentSubmission.objects.filter(
+                assignment=assignment, student=request.user,
+            ).exclude(grade=Answer.GRADE_UNGRADED).count()
+
     return render(request, 'notebooks/teacher_class_detail.html', {
         'cls': cls,
         'assignments': assignments,
         'students': students,
+        'is_teacher': is_teacher,
+        'is_student': is_student,
+        'statistics': statistics,
+        'teacher_questions': teacher_questions,
+        'manual_question_types': manual_question_types,
     })
+
+
+@login_required
+def take_assignment(request, assignment_id):
+    """Student-facing view: answer an assignment's questions, reusing the same
+    type-aware widgets and grading pipeline as notebook practice / exams."""
+    assignment = get_object_or_404(Assignment, id=assignment_id)
+    if not assignment.student_class.students.filter(pk=request.user.pk).exists():
+        raise Http404()
+
+    questions = list(assignment.questions.all())
+    submissions = {
+        s.question_id: s
+        for s in AssignmentSubmission.objects.filter(assignment=assignment, student=request.user)
+    }
+    for q in questions:
+        if q.pk not in submissions:
+            submissions[q.pk] = AssignmentSubmission.objects.create(
+                assignment=assignment, student=request.user, question=q,
+            )
+
+    question_submissions = [(q, submissions[q.pk]) for q in questions]
+    all_graded = bool(questions) and all(
+        s.grade != Answer.GRADE_UNGRADED for _, s in question_submissions
+    )
+
+    return render(request, 'notebooks/take_assignment.html', {
+        'assignment': assignment,
+        'question_submissions': question_submissions,
+        'all_graded': all_graded,
+    })
+
+
+@login_required
+@require_POST
+def save_assignment_answer(request, assignment_id, question_id):
+    assignment = get_object_or_404(Assignment, id=assignment_id)
+    if not assignment.student_class.students.filter(pk=request.user.pk).exists():
+        raise Http404()
+    if not assignment.questions.filter(pk=question_id).exists():
+        raise Http404()
+
+    submission, _ = AssignmentSubmission.objects.get_or_create(
+        assignment=assignment, student=request.user, question_id=question_id,
+    )
+    submission.user_answer = request.POST.get('user_answer', '')
+    if submission.grade != Answer.GRADE_UNGRADED:
+        submission.grade = Answer.GRADE_UNGRADED
+        submission.feedback = ''
+        submission.graded_at = None
+    submission.save()
+    return render(request, 'notebooks/partials/autosave_indicator.html', {
+        'saved': True, 'target': f'answer-{question_id}',
+    })
+
+
+@login_required
+@require_POST
+def submit_assignment(request, assignment_id):
+    """Grade every answered question in this student's assignment attempt -
+    structured types instantly (no AI), free text concurrently via the AI,
+    exactly like Grade All / exam finalization."""
+    assignment = get_object_or_404(Assignment, id=assignment_id)
+    if not assignment.student_class.students.filter(pk=request.user.pk).exists():
+        raise Http404()
+
+    submissions = list(
+        AssignmentSubmission.objects.filter(assignment=assignment, student=request.user)
+        .select_related('question')
+    )
+    pending = []
+    for submission in submissions:
+        question = submission.question
+        if not submission.user_answer.strip():
+            submission.grade = Answer.GRADE_INCORRECT
+            keywords = ', '.join(question.expected_keywords) if question.expected_keywords else 'N/A'
+            submission.feedback = f'No answer provided. Expected concepts: {keywords}'
+            submission.graded_at = timezone.now()
+            submission.save()
+            continue
+
+        structured = grading_service.grade_structured_answer(question, submission.user_answer)
+        if structured is not None:
+            submission.grade = structured['grade']
+            submission.feedback = structured['feedback']
+            submission.graded_at = timezone.now()
+            submission.save()
+        else:
+            pending.append(submission)
+
+    if pending:
+        items = [
+            {
+                'question_text': s.question.question_text,
+                'expected_answer': s.question.expected_answer,
+                'expected_keywords': s.question.expected_keywords,
+                'user_answer': s.user_answer,
+            }
+            for s in pending
+        ]
+        batch_results = ai_service.grade_answer_batch(items)
+        for submission, result in zip(pending, batch_results):
+            if result['ok']:
+                submission.grade = result['grade']
+                submission.feedback = result['feedback']
+            else:
+                submission.grade = Answer.GRADE_INCORRECT
+                submission.feedback = f"Grading failed: {result['error']}"
+            submission.graded_at = timezone.now()
+            submission.save()
+
+    from .services.features_service import ClassStatsService
+    ClassStatsService.update_class_statistics(assignment.student_class)
+
+    messages.success(request, f'Assignment "{assignment.title}" submitted!')
+    return redirect('notebooks:take_assignment', assignment_id=assignment.pk)
 
 
 @login_required
@@ -230,7 +489,7 @@ def join_class_view(request):
         return redirect('notebooks:teacher_dashboard_page')
     cls.students.add(request.user)
     messages.success(request, f'Joined class "{cls.name}"!')
-    return redirect('notebooks:teacher_dashboard_page')
+    return redirect('notebooks:teacher_class_detail', class_id=cls.id)
 
 
 # ── PDF Export ────────────────────────────────────────────────
@@ -315,8 +574,12 @@ def export_notebook_pdf(request, pk):
 from .models import (
     Notebook, Question, Answer, StudyAnalytics, QuestionReview,
     Badge, UserAchievement, StudyGroup, GroupComment, Notification,
-    StudentClass, Assignment, ExamSession, Topic, LearningPath, UserPreferences
+    StudentClass, Assignment, AssignmentSubmission, ClassStatistics,
+    ExamSession, Topic, LearningPath, UserPreferences
 )
+from .services import grading as grading_service
+from .services import ai_service
+from .services import throttle
 from .services.features_service import (
     AnalyticsService, SpacedRepetitionService, AchievementService,
     NotificationService, ExamService, LearningPathService, PreferencesService
@@ -429,9 +692,12 @@ def user_achievements(request):
 @login_required
 @require_POST
 def check_achievements(request):
-    """Check for new achievements to award"""
+    """Check for new achievements to award, plus two lower-key notifications
+    that were previously defined but never wired up anywhere: a once-a-day
+    streak nudge, and a "you have reviews due" reminder (only while none is
+    already sitting unread, so it can't spam)."""
     awarded = AchievementService.check_and_award_achievements(request.user)
-    
+
     new_badges = []
     for badge in awarded:
         new_badges.append({
@@ -440,10 +706,26 @@ def check_achievements(request):
             'icon': badge.icon,
             'color': badge.color,
         })
-        
+
         # Create achievement notification
         NotificationService.create_achievement_notification(request.user, badge)
-    
+
+    analytics = StudyAnalytics.objects.filter(user=request.user).first()
+    if analytics and analytics.study_streak_days >= 2:
+        today = timezone.now().date()
+        streak_already_sent_today = Notification.objects.filter(
+            user=request.user, notification_type='streak', created_at__date=today,
+        ).exists()
+        if not streak_already_sent_today:
+            NotificationService.create_streak_notification(request.user, analytics.study_streak_days)
+
+    if SpacedRepetitionService.get_due_reviews(request.user).exists():
+        reminder_already_pending = Notification.objects.filter(
+            user=request.user, notification_type='reminder', is_read=False,
+        ).exists()
+        if not reminder_already_pending:
+            NotificationService.create_review_reminder(request.user)
+
     return JsonResponse({
         'new_badges_earned': len(new_badges),
         'badges': new_badges,
@@ -514,11 +796,54 @@ def start_exam_session(request, notebook_id):
 @login_required
 @require_POST
 def end_exam_session(request, exam_id):
-    """End exam session and calculate score"""
+    """End exam session: grade any answers linked to it, then calculate score"""
+    from .services import ai_service, grading
     exam = get_object_or_404(ExamSession, id=exam_id, user=request.user)
+
+    pending = []  # (answer, question) needing an AI call
+    for answer in exam.answers.select_related('question').filter(grade=Answer.GRADE_UNGRADED):
+        question = answer.question
+        if not answer.user_answer.strip():
+            answer.grade = Answer.GRADE_INCORRECT
+            keywords = ', '.join(question.expected_keywords) if question.expected_keywords else 'N/A'
+            answer.feedback = f'No answer provided. Expected concepts: {keywords}'
+            answer.graded_at = timezone.now()
+            answer.save()
+            continue
+
+        structured = grading.grade_structured_answer(question, answer.user_answer)
+        if structured is not None:
+            answer.grade = structured['grade']
+            answer.feedback = structured['feedback']
+            answer.graded_at = timezone.now()
+            answer.save()
+        else:
+            pending.append((answer, question))
+
+    if pending:
+        items = [
+            {
+                'question_text': q.question_text,
+                'expected_answer': q.expected_answer,
+                'expected_keywords': q.expected_keywords,
+                'user_answer': a.user_answer,
+            }
+            for a, q in pending
+        ]
+        batch_results = ai_service.grade_answer_batch(items)
+        for (answer, question), result in zip(pending, batch_results):
+            if result['ok']:
+                answer.grade = result['grade']
+                answer.feedback = result['feedback']
+            else:
+                answer.grade = Answer.GRADE_INCORRECT
+                answer.feedback = f"Grading failed: {result['error']}"
+            answer.graded_at = timezone.now()
+            answer.save()
+
     exam = ExamService.finalize_exam_session(exam)
     report = ExamService.get_exam_report(exam)
-    
+
     return JsonResponse(report)
 
 
@@ -535,6 +860,50 @@ def exam_report(request, exam_id):
 # ════════════════════════════════════════════════════════════
 # FEATURE 13: LEARNING PATH SYSTEM
 # ════════════════════════════════════════════════════════════
+
+@login_required
+def learning_path_page(request, notebook_id):
+    """Student-facing learning path view: a suggested topic-by-topic study
+    order, extracted from the notebook's material on first request."""
+    notebook = get_object_or_404(Notebook, id=notebook_id, user=request.user)
+
+    try:
+        path = LearningPath.objects.get(notebook=notebook)
+    except LearningPath.DoesNotExist:
+        path = None
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        if action == 'generate':
+            if throttle.is_throttled(request.user, 'learning_path', seconds=5):
+                messages.error(request, 'Slow down a little - please wait a moment and try again.')
+            else:
+                source_text = (notebook.pdf_text or notebook.notes_content or '').strip()
+                if not source_text:
+                    messages.error(request, 'Upload a document or add notes before generating a learning path.')
+                else:
+                    try:
+                        path = LearningPathService.generate_learning_path(notebook)
+                        if not path.topic_sequence:
+                            messages.error(request, 'The AI could not extract topics from this material. Try again.')
+                    except Exception as exc:
+                        messages.error(request, f'Could not generate a learning path: {ai_service.friendly_error(exc)}')
+        elif action == 'mark_complete' and path:
+            LearningPathService.mark_current_topic_complete(path)
+        elif action == 'advance' and path:
+            LearningPathService.advance_topic(path)
+        return redirect('notebooks:learning_path_page', notebook_id=notebook.pk)
+
+    topics = list(Topic.objects.filter(notebook=notebook).order_by('order_index')) if path else []
+    current_topic = LearningPathService.get_current_topic(path) if path else None
+
+    return render(request, 'notebooks/learning_path.html', {
+        'notebook': notebook,
+        'path': path,
+        'topics': topics,
+        'current_topic': current_topic,
+    })
+
 
 @login_required
 @require_POST
@@ -766,7 +1135,10 @@ def add_group_comment(request, group_id):
         messages.error(request, 'Question and comment text are required.')
         return redirect('notebooks:study_group_detail_page', group_id=group_id)
 
-    question = get_object_or_404(Question, id=question_id)
+    # Restrict to the commenter's own questions - the dropdown only ever offers
+    # those, and without this check a crafted request could attach (and leak
+    # the text of) an arbitrary question from someone else's private notebook.
+    question = get_object_or_404(Question, id=question_id, notebook__user=request.user)
 
     comment = GroupComment.objects.create(
         study_group=group,

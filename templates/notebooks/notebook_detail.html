@@ -61,15 +61,31 @@
           </a>
         </li>
         <li>
+          <a class="dropdown-item" href="{% url 'notebooks:learning_path_page' notebook.pk %}">
+            <i class="bi bi-signpost-split me-2"></i>Learning Path
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item" href="{% url 'notebooks:notebook_chat_page' notebook.pk %}">
+            <i class="bi bi-chat-dots me-2"></i>Ask AI Tutor
+          </a>
+        </li>
+        <li>
           {% if notebook.is_pdf_embeddable %}
           <button class="dropdown-item" data-bs-toggle="modal" data-bs-target="#pdfViewerModal">
             <i class="bi bi-file-earmark-text me-2"></i>View source PDF
           </button>
           {% else %}
-          <a class="dropdown-item" href="{{ notebook.pdf_file.url }}" download rel="noopener">
+          <a class="dropdown-item" href="{% url 'notebooks:notebook_pdf_file' notebook.pk %}" download rel="noopener">
             <i class="bi bi-download me-2"></i>Download source file
           </a>
           {% endif %}
+        </li>
+        <li><hr class="dropdown-divider"></li>
+        <li>
+          <button class="dropdown-item" data-bs-toggle="modal" data-bs-target="#shareModal">
+            <i class="bi bi-share me-2"></i>Share
+          </button>
         </li>
         <li><hr class="dropdown-divider"></li>
         <li>
@@ -255,20 +271,20 @@
       </div>
       <div class="modal-body p-0 h-100 d-flex flex-column">
         {% if notebook.is_pdf_embeddable %}
-        <iframe data-src="{{ notebook.pdf_file.url }}" width="100%" height="100%"
+        <iframe data-src="{% url 'notebooks:notebook_pdf_file' notebook.pk %}" width="100%" height="100%"
           style="border:none;display:block;min-height:75vh;flex:1;"
           title="Source PDF"></iframe>
         {% else %}
         <div class="p-4 text-center text-muted flex-fill d-flex flex-column align-items-center justify-content-center">
           <i class="bi bi-file-earmark-text display-4 mb-3 text-accent"></i>
           <p class="mb-3">In-app preview is available for <strong>PDF</strong> uploads only. Download your original file to open it in Word or another app.</p>
-          <a href="{{ notebook.pdf_file.url }}" class="btn btn-accent" download rel="noopener">
+          <a href="{% url 'notebooks:notebook_pdf_file' notebook.pk %}" class="btn btn-accent" download rel="noopener">
             <i class="bi bi-download me-2"></i>Download source file
           </a>
         </div>
         {% endif %}
         <div class="p-3 border-top" style="border-color:var(--bg-border) !important;">
-          <a href="{{ notebook.pdf_file.url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">
+          <a href="{% url 'notebooks:notebook_pdf_file' notebook.pk %}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">
             <i class="bi bi-box-arrow-up-right me-1"></i>Open in new tab
           </a>
         </div>
@@ -276,6 +292,73 @@
     </div>
   </div>
 </div>
+
+<!-- Share Modal -->
+<div class="modal fade" id="shareModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content glass">
+      <div class="modal-header" style="border-bottom:1px solid var(--bg-border);">
+        <h6 class="modal-title fw-semibold mb-0"><i class="bi bi-share me-2 text-accent"></i>Share this notebook</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" id="sharePublicToggle" {% if notebook.is_public %}checked{% endif %}>
+          <label class="form-check-label" for="sharePublicToggle">Make this notebook public</label>
+        </div>
+        <p class="text-muted small mb-2">Anyone with the link below can view a read-only copy of your notes and questions - no account needed. They can't edit, grade, or see your answers.</p>
+        <div id="shareLinkArea" class="{% if not notebook.is_public %}d-none{% endif %}">
+          <div class="input-group">
+            <input type="text" class="form-control font-mono" id="shareLinkInput" readonly
+                   value="{% if notebook.is_public %}{% url 'notebooks:shared_notebook' notebook.share_token %}{% endif %}">
+            <button class="btn btn-outline-accent" type="button" id="copyShareLinkBtn">
+              <i class="bi bi-clipboard"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const toggle = document.getElementById('sharePublicToggle');
+    const linkArea = document.getElementById('shareLinkArea');
+    const linkInput = document.getElementById('shareLinkInput');
+    const copyBtn = document.getElementById('copyShareLinkBtn');
+    const csrf = () => document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('csrftoken='))?.split('=')[1] || '';
+
+    if (toggle) {
+      toggle.addEventListener('change', () => {
+        fetch('{% url "notebooks:toggle_sharing" notebook.pk %}', {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `is_public=${toggle.checked}`,
+        })
+          .then(r => r.json())
+          .then(data => {
+            if (data.is_public && data.share_url) {
+              linkInput.value = data.share_url;
+              linkArea.classList.remove('d-none');
+            } else {
+              linkArea.classList.add('d-none');
+            }
+          });
+      });
+    }
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        linkInput.select();
+        navigator.clipboard.writeText(linkInput.value).then(() => {
+          const icon = copyBtn.querySelector('i');
+          icon.className = 'bi bi-check-lg';
+          setTimeout(() => { icon.className = 'bi bi-clipboard'; }, 1500);
+        });
+      });
+    }
+  })();
+</script>
 
 <script>
   document.addEventListener('shown.bs.modal', function (evt) {
@@ -360,6 +443,7 @@
       el.innerHTML = text.trim()
         ? marked.parse(text)
         : '<p class="notes-placeholder">Your notes will appear here after processing…</p>';
+      if (window.cornoteRenderMath) window.cornoteRenderMath(el);
     }
     if (window.marked) { doRender(); }
     else { document.addEventListener('markedReady', doRender); }
@@ -584,4 +668,5 @@
 <script src="/static/js/timer.js"></script>
 <script src="/static/js/cornote.js"></script>
 <script src="/static/js/features.js"></script>
+<script src="/static/js/question-widgets.js"></script>
 {% endblock %}

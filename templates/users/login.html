@@ -2,19 +2,25 @@
 {% block title %}Sign In | Cornote{% endblock %}
 
 {% block content %}
-<div class="auth-page d-flex align-items-center justify-content-center min-vh-100">
+<div class="auth-page d-flex align-items-center justify-content-center min-vh-100 px-3 py-4">
   <div class="auth-card">
     <div class="text-center mb-4">
-      <i class="bi bi-journal-bookmark-fill display-4 text-accent"></i>
+      <i class="bi bi-journal-bookmark-fill display-4 text-accent auth-brand-icon" aria-hidden="true"></i>
       <h1 class="h3 mt-2 fw-bold">Welcome back</h1>
       <p class="text-muted">Sign in to your study space</p>
     </div>
 
     <form method="post" novalidate>
       {% csrf_token %}
+      {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+      {% if form.non_field_errors %}
+        <div class="alert alert-danger py-2 small" role="alert">
+          {% for error in form.non_field_errors %}<div>{{ error }}</div>{% endfor %}
+        </div>
+      {% endif %}
       {% for field in form %}
       <div class="mb-3">
-        <label class="form-label text-muted small">{{ field.label }}</label>
+        <label for="{{ field.id_for_label }}" class="form-label text-muted small">{{ field.label }}</label>
         {{ field }}
         {% if field.errors %}
           <div class="invalid-feedback d-block">{{ field.errors.0 }}</div>
@@ -26,10 +32,21 @@
       </button>
     </form>
 
-    <p class="text-center mt-4 text-muted small">
+    <p class="text-center mt-3 mb-0">
+      <a href="{% url 'users:password_reset' %}" class="text-muted small">Forgot your password?</a>
+    </p>
+    <p class="text-center mt-2 text-muted small">
       No account?
       <a href="{% url 'users:register' %}" class="text-accent">Create one free</a>
     </p>
+
+    <hr class="my-3">
+    <form method="post" action="{% url 'users:demo_login' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-ghost w-100 py-2">
+        <i class="bi bi-play-circle me-2"></i>Try Demo (no account needed)
+      </button>
+    </form>
   </div>
 </div>
 {% endblock %}

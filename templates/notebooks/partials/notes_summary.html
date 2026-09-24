@@ -1,5 +1,5 @@
 {% if error %}
-  <div class="alert alert-danger" role="alert">
+  <div class="alert audio-note danger" role="alert">
     <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
   </div>
 {% else %}
@@ -13,8 +13,7 @@
     
     {% if summary.ai_summary %}
       {{ summary.ai_summary|json_script:"ai-summary-data" }}
-      <div id="ai-summary-body" class="summary-content p-3 rounded"
-           style="background:var(--bg-elevated);line-height:1.8;max-height:400px;overflow-y:auto;font-size:.88rem;"></div>
+      <div id="ai-summary-body" class="summary-content summary-glass summary-reader p-3" tabindex="0"></div>
       <script>
         (function(){
           const text = JSON.parse(document.getElementById('ai-summary-data').textContent);
@@ -25,11 +24,11 @@
         })();
       </script>
       
-      <div class="mt-3 d-flex gap-2 flex-wrap">
-        <button class="btn btn-sm btn-outline-primary" id="copy-summary-btn" onclick="copySummaryToClipboard()">
+      <div class="mt-3 summary-actions">
+        <button class="btn btn-sm btn-soft" id="copy-summary-btn" onclick="copySummaryToClipboard()">
           <i class="bi bi-clipboard me-1"></i>Copy
         </button>
-        <button class="btn btn-sm btn-outline-secondary"
+        <button class="btn btn-sm btn-soft"
                 hx-post="{% url 'notebooks:notes_summary' notebook.pk %}?refresh=1"
                 hx-target="#ai-summary-content"
                 hx-swap="innerHTML"
@@ -38,7 +37,7 @@
           <i class="bi bi-arrow-clockwise me-1"></i>Regenerate
         </button>
 
-        <button class="btn btn-sm btn-outline-accent" id="audio-summary-btn" onclick="generateAudioSummary()">
+        <button class="btn btn-sm btn-soft-accent" id="audio-summary-btn" onclick="generateAudioSummary()">
           <i class="bi bi-volume-up me-1" id="audio-btn-icon"></i>
           <span id="audio-btn-label">{% if summary.audio_file %}Regenerate Audio{% else %}Audio Summary{% endif %}</span>
         </button>
@@ -52,12 +51,14 @@
           from { opacity: 0; transform: translateY(6px); }
           to   { opacity: 1; transform: translateY(0); }
         }
+        /* Skeleton mirrors the .audio-frame footprint (head row + 40px player + foot row) */
         .audio-skeleton {
           background: linear-gradient(90deg, var(--bg-elevated) 25%, var(--bg-border, #e0e0e0) 50%, var(--bg-elevated) 75%);
           background-size: 200% 100%;
           animation: audioSkeleton 1.4s ease infinite;
-          border-radius: 8px;
-          height: 52px;
+          border: 1px solid var(--bg-glass-border);
+          border-radius: var(--radius-md);
+          height: 118px;
         }
         @keyframes audioSkeleton {
           0%   { background-position: 200% 0; }
@@ -73,7 +74,8 @@
           display: inline-block;
           width: 4px;
           border-radius: 2px;
-          background: var(--bs-primary, #0d6efd);
+          background: var(--accent, #f59e0b);
+          box-shadow: 0 0 6px -1px var(--accent-glow);
           animation: waveBar 1s ease-in-out infinite;
         }
         .audio-waveform span:nth-child(1) { height: 8px;  animation-delay: 0s; }
@@ -91,14 +93,21 @@
 
       <div id="audio-summary-container" class="mt-3">
         {% if summary.audio_file %}
-          <audio controls preload="auto" style="width: 100%;">
-            <source src="{{ summary.audio_file.url }}" type="{% if summary.audio_file.name|lower|slice:'-3:' == 'wav' %}audio/wav{% else %}audio/mpeg{% endif %}">
-            Your browser does not support the audio element.
-          </audio>
-          <div class="mt-2">
-            <a href="{{ summary.audio_file.url }}" download class="btn btn-sm btn-outline-primary">
-              <i class="bi bi-download me-1"></i>Download Audio
-            </a>
+          <div class="audio-frame">
+            <div class="audio-frame-head">
+              <span class="audio-frame-title"><i class="bi bi-soundwave"></i>Audio Summary</span>
+              <span class="audio-frame-status">Saved</span>
+            </div>
+            <audio controls preload="auto">
+              <source src="{% url 'notebooks:summary_audio_file' notebook.pk %}" type="{% if summary.audio_file.name|lower|slice:'-3:' == 'wav' %}audio/wav{% else %}audio/mpeg{% endif %}">
+              Your browser does not support the audio element.
+            </audio>
+            <div class="audio-frame-foot">
+              <span class="audio-frame-status">Listen while you review your notes</span>
+              <a href="{% url 'notebooks:summary_audio_file' notebook.pk %}" download class="btn btn-sm btn-soft">
+                <i class="bi bi-download me-1"></i>Download Audio
+              </a>
+            </div>
           </div>
         {% endif %}
       </div>
@@ -136,24 +145,25 @@ function renderBrowserAudioControls(message) {
   const container = document.getElementById('audio-summary-container');
   if (!container) return;
   container.innerHTML = `
-    <div class="alert alert-warning mb-3" role="alert">
+    <div class="alert audio-note warning mb-3" role="alert">
       <i class="bi bi-speaker me-2"></i>${message}
     </div>
-    <div class="p-3 rounded" style="background:var(--bg-elevated);border:1px solid var(--bg-border);">
-      <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-2">
-        <div class="small text-muted" id="browser-audio-status">Ready to play in your browser</div>
+    <div class="audio-frame">
+      <div class="audio-frame-head">
+        <span class="audio-frame-title"><i class="bi bi-soundwave"></i>Browser Audio</span>
+        <span class="audio-frame-status" id="browser-audio-status">Ready to play in your browser</span>
       </div>
-      <div class="d-flex gap-2 flex-wrap align-items-center">
-        <button type="button" class="btn btn-sm btn-outline-accent" id="browser-audio-play">
+      <div class="summary-actions">
+        <button type="button" class="btn btn-sm btn-soft-accent" id="browser-audio-play">
           <i class="bi bi-play-fill me-1"></i>Play
         </button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="browser-audio-pause" disabled>
+        <button type="button" class="btn btn-sm btn-soft" id="browser-audio-pause" disabled>
           <i class="bi bi-pause-fill me-1"></i>Pause
         </button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="browser-audio-resume" disabled>
+        <button type="button" class="btn btn-sm btn-soft" id="browser-audio-resume" disabled>
           <i class="bi bi-arrow-clockwise me-1"></i>Resume
         </button>
-        <button type="button" class="btn btn-sm btn-outline-danger" id="browser-audio-stop" disabled>
+        <button type="button" class="btn btn-sm btn-soft-danger" id="browser-audio-stop" disabled>
           <i class="bi bi-stop-fill me-1"></i>Stop
         </button>
       </div>
@@ -352,14 +362,21 @@ function generateAudioSummary() {
       const audioType = data.audio_content_type || 'audio/mpeg';
       const audioLabel = audioType === 'audio/wav' ? 'Download WAV' : 'Download MP3';
       _revealAudioPlayer(`
-        <audio controls preload="auto" style="width:100%;border-radius:8px;">
-          <source src="${data.audio_url}" type="${audioType}">
-          Your browser does not support the audio element.
-        </audio>
-        <div class="mt-2">
-          <a href="${data.audio_url}" download class="btn btn-sm btn-outline-primary">
-            <i class="bi bi-download me-1"></i>${audioLabel}
-          </a>
+        <div class="audio-frame">
+          <div class="audio-frame-head">
+            <span class="audio-frame-title"><i class="bi bi-soundwave"></i>Audio Summary</span>
+            <span class="audio-frame-status"><i class="bi bi-check-circle me-1 text-success-edu"></i>Ready</span>
+          </div>
+          <audio controls preload="auto">
+            <source src="${data.audio_url}" type="${audioType}">
+            Your browser does not support the audio element.
+          </audio>
+          <div class="audio-frame-foot">
+            <span class="audio-frame-status">Listen while you review your notes</span>
+            <a href="${data.audio_url}" download class="btn btn-sm btn-soft">
+              <i class="bi bi-download me-1"></i>${audioLabel}
+            </a>
+          </div>
         </div>
       `);
       const icon = document.getElementById('audio-btn-icon');
@@ -379,9 +396,9 @@ function generateAudioSummary() {
       const cooldown = Math.min(30, Math.pow(2, state.count));
       const retryId = `audio-retry-${notebookPk}`;
       _revealAudioPlayer(`
-        <div class="alert alert-danger d-flex justify-content-between align-items-center">
-          <div>${data.error}</div>
-          <button id="${retryId}" class="btn btn-sm btn-outline-secondary ms-2" disabled>Retry in ${cooldown}s</button>
+        <div class="alert audio-note danger d-flex justify-content-between align-items-center gap-2 flex-wrap mb-0" role="alert">
+          <div><i class="bi bi-exclamation-circle me-2"></i>${data.error}</div>
+          <button id="${retryId}" class="btn btn-sm btn-soft ms-auto" disabled>Retry in ${cooldown}s</button>
         </div>`);
       let remaining = cooldown;
       const retryTimer = setInterval(() => {
@@ -412,9 +429,9 @@ function generateAudioSummary() {
     const cooldown = Math.min(30, Math.pow(2, state.count));
     const retryId = `audio-retry-${notebookPk}`;
     _revealAudioPlayer(`
-      <div class="alert alert-danger d-flex justify-content-between align-items-center">
-        <div>Audio generation failed. Network or service error.</div>
-        <button id="${retryId}" class="btn btn-sm btn-outline-secondary ms-2" disabled>Retry in ${cooldown}s</button>
+      <div class="alert audio-note danger d-flex justify-content-between align-items-center gap-2 flex-wrap mb-0" role="alert">
+        <div><i class="bi bi-exclamation-circle me-2"></i>Audio generation failed. Network or service error.</div>
+        <button id="${retryId}" class="btn btn-sm btn-soft ms-auto" disabled>Retry in ${cooldown}s</button>
       </div>`);
     let remaining = cooldown;
     const retryTimer = setInterval(() => {

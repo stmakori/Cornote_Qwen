@@ -1,0 +1,9 @@
+{% load static %}
+<div class="d-flex {% if message.role == 'user' %}justify-content-end{% else %}justify-content-start{% endif %}">
+  <div class="px-3 py-2 rounded-3" style="max-width:80%;
+      {% if message.role == 'user' %}background:var(--accent);color:#fff;
+      {% else %}background:var(--bg-elevated);color:var(--text-primary);{% endif %}">
+    {% if message.role == 'assistant' %}<i class="bi bi-stars me-1 small"></i>{% endif %}
+    <span class="small" style="white-space:pre-wrap;">{{ message.content }}</span>
+  </div>
+</div>
