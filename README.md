@@ -2,6 +2,8 @@
 
 ### 🔴 Live demo: [https://bit.ly/4AF7FcM](https://bit.ly/4AF7FcM)
 
+Currently hosted on AWS Lightsail.
+
 **Your PDF. Your Questions. Your Cornell Notes. Instantly.**
 
 Cornote turns any PDF into a complete, interactive Cornell study session. Upload a
@@ -93,6 +95,7 @@ implemented end to end:
   `anthropic` SDK, no external agent framework.
 - **Audio:** gTTS for generated audio summaries.
 - **Static files:** WhiteNoise.
+- **Hosting:** AWS Lightsail, currently live at the demo link above.
 
 ## Setup
 
