@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views, views_features
+from . import views, views_features, views_agents
 
 app_name = 'notebooks'
 
@@ -28,6 +28,11 @@ urlpatterns = [
     path('<int:pk>/chat/', views.notebook_chat_page, name='notebook_chat_page'),
     path('<int:pk>/chat/send/', views.notebook_chat, name='notebook_chat'),
     path('<int:pk>/export-anki/', views.export_anki, name='export_anki'),
+
+    # ────────────── AGENT WORKFLOW ──────────────
+    path('<int:pk>/coach/', views_agents.coach_panel, name='coach_panel'),
+    path('<int:pk>/coach/exam-date/', views_agents.set_exam_date, name='set_exam_date'),
+    path('<int:pk>/coach/replan/', views_agents.replan, name='replan'),
 
     # ────────────── SHARING & GATED FILE ACCESS ──────────────
     path('<int:pk>/pdf-file/', views.serve_notebook_pdf, name='notebook_pdf_file'),

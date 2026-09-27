@@ -33,6 +33,7 @@
 
     <span class="question-number">Q{{ question.order_index }}</span>
     <p class="question-text mt-1">{{ question.question_text }}</p>
+    {% if question.agent_note %}<p class="small text-info mb-1"><i class="bi bi-robot me-1"></i>{{ question.agent_note }}</p>{% endif %}
 
     {% include 'notebooks/partials/_answer_widget.html' with question=question answer=answer readonly=False autosave=True show_hint=True %}
 

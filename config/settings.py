@@ -89,6 +89,15 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# Explicit (not umask-dependent) permissions for uploaded files/dirs, so
+# media/ stays writable by both the deploy user and whichever user the web
+# server runs as, regardless of which one creates a given file or
+# subdirectory first - relying on the OS default umask left newly created
+# subdirectories at 755 (owner-write only), which broke the other user's
+# access to anything the first one created.
+FILE_UPLOAD_PERMISSIONS = 0o664
+FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o775
+
 # Optional S3 for user uploads (set AWS_STORAGE_BUCKET_NAME to enable)
 AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
 AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
@@ -131,19 +140,12 @@ SESSION_COOKIE_AGE = 86400 * 30  # 30 days
 MAX_PDF_SIZE_MB = config('MAX_PDF_SIZE_MB', default=50, cast=int)
 MAX_UPLOAD_MB = config('MAX_UPLOAD_MB', default=MAX_PDF_SIZE_MB, cast=int)
 
-# AI providers: Qwen powers all text generation (notes, questions, grading,
-# hints, tutor chat); Anthropic Claude is kept as a separate pathway used only
-# for scanned-page math OCR/vision transcription.
-AI_PROVIDER = 'qwen'
+# Claude/Anthropic AI provider
+AI_PROVIDER = 'anthropic'
 AI_REQUEST_TIMEOUT = config('AI_REQUEST_TIMEOUT', default=120, cast=float)
 AI_MAX_RETRIES = config('AI_MAX_RETRIES', default=3, cast=int)
 
-# Qwen settings (primary text AI provider)
-QWEN_API_KEY = config('QWEN_API_KEY', default='')
-QWEN_MODEL_ID = config('QWEN_MODEL_ID', default='Qwen-Ambassador/Qwen3.8-Max')
-QWEN_BASE_URL = config('QWEN_BASE_URL', default='https://api-inference.modelscope.ai/v1')
-
-# Anthropic settings (math OCR/vision transcription only)
+# Anthropic settings
 ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default='')
 ANTHROPIC_MODEL_ID = config('ANTHROPIC_MODEL_ID', default='claude-sonnet-5')
 ANTHROPIC_BASE_URL = config('ANTHROPIC_BASE_URL', default='https://api.anthropic.com')
@@ -152,6 +154,21 @@ AWS_REGION = config('AWS_REGION', default='us-east-2')
 AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
 AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
 AWS_SESSION_TOKEN = config('AWS_SESSION_TOKEN', default='')
+
+# ── Agent workflow ───────────────────────────────────────────────────
+# Feedback/study-plan/verifier/coach agents, built on a native Claude tool-use loop.
+AGENTS_ENABLED = config('AGENTS_ENABLED', default=True, cast=bool)
+AGENT_MODEL_ID = config('AGENT_MODEL_ID', default=ANTHROPIC_MODEL_ID)
+# Safety limits so a confused agent can't loop and burn API credits.
+AGENT_MAX_TOOL_CALLS = config('AGENT_MAX_TOOL_CALLS', default=10, cast=int)
+AGENT_MAX_FEEDBACK_PER_GRADING = config('AGENT_MAX_FEEDBACK_PER_GRADING', default=3, cast=int)
+AGENT_MAX_PLAN_DAYS = config('AGENT_MAX_PLAN_DAYS', default=14, cast=int)
+# Run agents in the request thread instead of a background thread (tests/debugging).
+AGENTS_RUN_INLINE = config('AGENTS_RUN_INLINE', default=False, cast=bool)
+# Never let the test suite call real AI providers; agent tests opt in with mocks.
+import sys as _sys
+if len(_sys.argv) > 1 and _sys.argv[1] == 'test':
+    AGENTS_ENABLED = False
 
 # Messages framework
 from django.contrib.messages import constants as messages
@@ -163,10 +180,50 @@ MESSAGE_TAGS = {
     messages.ERROR: 'danger',
 }
 
+# Django's default logging config only sends errors to the console when
+# DEBUG=True (and otherwise emails ADMINS, which does nothing if ADMINS is
+# empty) - with DEBUG=False and no ADMINS configured, unhandled exceptions
+# would otherwise be logged nowhere at all. Force request-level errors to
+# always reach stderr (which Apache/mod_wsgi captures into its error log)
+# regardless of DEBUG, so turning DEBUG off doesn't also turn off visibility
+# into what's breaking.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[{asctime}] {levelname} {name}: {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    },
+}
+
 if not DEBUG:
     from django.core.exceptions import ImproperlyConfigured
 
-    if not SECRET_KEY or SECRET_KEY == 'unsafe-secret-key-change-me':
+    _INSECURE_SECRET_KEYS = {
+        'unsafe-secret-key-change-me',
+        'your-django-secret-key-here-replace-with-a-long-random-string',
+    }
+    if not SECRET_KEY or SECRET_KEY in _INSECURE_SECRET_KEYS or len(SECRET_KEY) < 20:
         raise ImproperlyConfigured(
             'SECRET_KEY must be set to a secure random value when DEBUG=False.'
         )

@@ -104,3 +104,28 @@ class AddGroupCommentOwnershipTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(GroupComment.objects.filter(question=own_question, author=self.member).exists())
+
+
+class CreateStudyGroupTests(TestCase):
+    """create_study_group is posted to by a plain HTML form (study_groups.html),
+    not fetched via AJAX - it must redirect like its siblings join_group/
+    leave_group, not return JsonResponse, or the browser is left stranded on
+    the raw JSON response instead of navigating anywhere."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='creator', password='pw')
+        self.client.force_login(self.user)
+
+    def test_redirects_to_the_new_group_detail_page(self):
+        response = self.client.post(
+            reverse('notebooks:create_group'),
+            {'name': 'New Group', 'description': 'desc'},
+        )
+        group = StudyGroup.objects.get(name='New Group')
+        self.assertRedirects(response, reverse('notebooks:study_group_detail_page', args=[group.pk]))
+
+    def test_creator_is_added_as_a_member(self):
+        self.client.post(reverse('notebooks:create_group'), {'name': 'Another Group'})
+        group = StudyGroup.objects.get(name='Another Group')
+        self.assertIn(self.user, group.members.all())
+        self.assertEqual(group.creator, self.user)

@@ -112,18 +112,23 @@
       </button>
       <span class="badge timer-phase-badge" id="timer-phase-badge">Focus</span>
     </div>
+
+    <!-- Coach sidebar toggle -->
+    <button type="button" class="btn btn-sm btn-ghost" id="coach-toggle-btn" title="Show/hide Coach sidebar" onclick="toggleCoachSidebar()">
+      <i class="bi bi-robot"></i>
+    </button>
   </div>
 </div>
 
 <!-- ── Cornell Notebook Grid ── -->
-<div class="cornell-grid">
+<div class="cornell-grid" id="cornell-grid">
 
   <!-- LEFT COLUMN: Cues / Questions -->
   <div class="cornell-questions" id="questions-column">
     {% include 'notebooks/partials/questions_column.html' %}
   </div>
 
-  <!-- RIGHT COLUMN: Notes -->
+  <!-- MIDDLE COLUMN: Notes -->
   <div class="cornell-notes">
     <div class="cornell-col-header">
       <i class="bi bi-file-text me-2"></i>Notes
@@ -166,6 +171,19 @@
       hx-target="#notes-save-indicator"
       hx-swap="innerHTML"
     >{{ notebook.notes_content }}</textarea>
+  </div>
+
+  <!-- RIGHT SIDEBAR: Cornote Coach (agent workflow) -->
+  <div class="cornell-coach" id="coach-sidebar">
+    <button type="button" class="btn btn-ghost btn-sm cornell-coach-minimize" title="Minimize Coach" onclick="toggleCoachSidebar()">
+      <i class="bi bi-chevron-double-right"></i>
+    </button>
+    <div id="coach-panel"
+         hx-get="{% url 'notebooks:coach_panel' notebook.pk %}"
+         hx-trigger="load, coachRefresh from:body"
+         hx-swap="innerHTML">
+      <div class="small text-muted p-3"><i class="bi bi-robot me-1"></i>Loading Cornote Coach…</div>
+    </div>
   </div>
 
 </div>
@@ -646,11 +664,29 @@
     });
   }
 
+  // ── Coach sidebar toggle ─────────────────────────────
+  const COACH_COLLAPSED_KEY = 'cornote-coach-collapsed';
+
+  function setCoachCollapsed(collapsed) {
+    const grid = document.getElementById('cornell-grid');
+    const btn = document.getElementById('coach-toggle-btn');
+    if (grid) grid.classList.toggle('coach-collapsed', collapsed);
+    if (btn) btn.classList.toggle('active', collapsed);
+  }
+
+  function toggleCoachSidebar() {
+    const grid = document.getElementById('cornell-grid');
+    const collapsed = grid ? !grid.classList.contains('coach-collapsed') : false;
+    setCoachCollapsed(collapsed);
+    try { localStorage.setItem(COACH_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (err) { /* private browsing */ }
+  }
+
   // Expose for inline onclick handlers used in template/partials.
   window.switchSummaryTab = switchSummaryTab;
   window.reformatNotes = reformatNotes;
   window.generateAiSummary = generateAiSummary;
   window.getFeedback = getFeedback;
+  window.toggleCoachSidebar = toggleCoachSidebar;
 
   document.addEventListener('DOMContentLoaded', () => {
     try {
@@ -663,6 +699,9 @@
     } catch (err) {
       console.error('Notebook UI initialization error:', err);
     }
+    try {
+      if (localStorage.getItem(COACH_COLLAPSED_KEY) === '1') setCoachCollapsed(true);
+    } catch (err) { /* private browsing */ }
   });
 </script>
 <script src="/static/js/timer.js"></script>

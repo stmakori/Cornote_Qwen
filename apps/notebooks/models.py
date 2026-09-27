@@ -163,6 +163,14 @@ class Question(models.Model):
     difficulty = models.IntegerField(choices=DIFFICULTY_CHOICES, default=2)
     is_flashcard = models.BooleanField(default=False)
     needs_review = models.BooleanField(default=False)
+
+    # Agent workflow: follow-up questions created by the feedback agent to
+    # re-test a specific weak point in a later session.
+    created_by_agent = models.BooleanField(default=False)
+    source_question = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='followups',
+    )
+    agent_note = models.CharField(max_length=255, blank=True, help_text='Why an agent created or flagged this question')
     
     created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -733,3 +741,62 @@ class UserPreferences(models.Model):
 
     def __str__(self):
         return f'Preferences for {self.user.username}'
+
+
+# ════════════════════════════════════════════════════════════
+# AGENT WORKFLOW
+# ════════════════════════════════════════════════════════════
+
+class StudyPlan(models.Model):
+    """Day-by-day plan owned by the study-plan agent; re-planned automatically."""
+    notebook = models.OneToOneField(Notebook, on_delete=models.CASCADE, related_name='study_plan')
+    exam_date = models.DateField(null=True, blank=True)
+    # [{"date": "YYYY-MM-DD", "focus": str, "tasks": [str], "minutes": int}]
+    days = models.JSONField(default=list, blank=True)
+    rationale = models.TextField(blank=True)
+    version = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'Study plan v{self.version} for {self.notebook.title}'
+
+
+class AgentRun(models.Model):
+    """Audit trail of one agent run: trigger, provider, tool steps and output."""
+    AGENT_FEEDBACK = 'feedback'
+    AGENT_STUDY_PLAN = 'study_plan'
+    AGENT_VERIFIER = 'verifier'
+    AGENT_COACH = 'coach'
+    AGENT_CHOICES = [
+        (AGENT_FEEDBACK, 'Feedback agent'),
+        (AGENT_STUDY_PLAN, 'Study-plan agent'),
+        (AGENT_VERIFIER, 'Question verifier'),
+        (AGENT_COACH, 'Tutor coach'),
+    ]
+    STATUS_RUNNING = 'running'
+    STATUS_OK = 'ok'
+    STATUS_FAILED = 'failed'
+    STATUS_CHOICES = [
+        (STATUS_RUNNING, 'Running'),
+        (STATUS_OK, 'Completed'),
+        (STATUS_FAILED, 'Failed'),
+    ]
+
+    notebook = models.ForeignKey(Notebook, on_delete=models.CASCADE, related_name='agent_runs')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='agent_runs')
+    agent = models.CharField(max_length=20, choices=AGENT_CHOICES)
+    trigger = models.CharField(max_length=40, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_RUNNING)
+    provider = models.CharField(max_length=40, blank=True)
+    steps = models.JSONField(default=list, blank=True)  # [{"tool", "input", "result"}]
+    output = models.TextField(blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['notebook', 'user', '-created_at'])]
+
+    def __str__(self):
+        return f'{self.get_agent_display()} ({self.status}) on {self.notebook_id}'

@@ -179,3 +179,26 @@ class SharedNotebookViewTests(TestCase):
         self.notebook.save()
         response = self.client.get(reverse('notebooks:shared_notebook', args=[token]))
         self.assertEqual(response.status_code, 404)
+
+    def test_markdown_notes_render_as_html_not_literal_syntax(self):
+        """The shared page has no client-side marked.js like the owner's editor
+        does - notes_content (Markdown, from format_notes_as_markdown) must be
+        rendered server-side or ## headings and **bold** show up as literal,
+        unformatted text."""
+        self.notebook.notes_content = '## Heading\n\n**bold text** and normal text'
+        self.notebook.save()
+        response = self.client.get(reverse('notebooks:shared_notebook', args=[self.notebook.share_token]))
+        self.assertContains(response, '<h2>Heading</h2>', html=False)
+        self.assertContains(response, '<strong>bold text</strong>', html=False)
+        self.assertNotContains(response, '##')
+
+    def test_notes_content_html_is_escaped_not_executed(self):
+        """notes_content is AI-generated or freely user-edited text rendered on
+        an unauthenticated public page - it must never be trusted as raw HTML,
+        or a notebook owner (or a compromised AI response) could inject a
+        script that runs in every anonymous visitor's browser."""
+        self.notebook.notes_content = 'Before <script>alert(1)</script> after'
+        self.notebook.save()
+        response = self.client.get(reverse('notebooks:shared_notebook', args=[self.notebook.share_token]))
+        self.assertNotContains(response, '<script>alert(1)</script>')
+        self.assertContains(response, '&lt;script&gt;')

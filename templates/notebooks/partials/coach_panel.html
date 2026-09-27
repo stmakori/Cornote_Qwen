@@ -1,0 +1,86 @@
+{# Cornote Coach: study plan + live trace of what the agents did. Refreshed by HTMX. #}
+{% if running %}
+<div hx-get="{% url 'notebooks:coach_panel' notebook.pk %}" hx-trigger="every 4s" hx-target="#coach-panel" hx-swap="innerHTML"></div>
+{% endif %}
+<div class="coach-card border rounded-3 p-3">
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+    <div class="fw-semibold">
+      <i class="bi bi-robot me-1"></i>Cornote Coach
+      <span class="text-muted small fw-normal">· AI agents working on your notebook</span>
+      {% if running %}<span class="spinner-border spinner-border-sm ms-2 text-primary" role="status" aria-label="Agents working"></span>{% endif %}
+    </div>
+    {% if agents_enabled %}
+    <form class="d-flex align-items-center gap-2 flex-wrap"
+          hx-post="{% url 'notebooks:set_exam_date' notebook.pk %}" hx-target="#coach-panel" hx-swap="innerHTML">
+      <label for="exam-date-input" class="small text-muted mb-0">Exam date</label>
+      <input id="exam-date-input" type="date" name="exam_date" class="form-control form-control-sm" style="width:auto;"
+             min="{{ today|date:'Y-m-d' }}" value="{% if plan.exam_date %}{{ plan.exam_date|date:'Y-m-d' }}{% endif %}" required>
+      <button type="submit" class="btn btn-sm btn-outline-accent">{% if plan.days %}Update{% else %}Build my plan{% endif %}</button>
+      {% if plan %}
+      <button type="button" class="btn btn-sm btn-ghost" title="Ask the study-plan agent to re-plan now"
+              hx-post="{% url 'notebooks:replan' notebook.pk %}" hx-target="#coach-panel" hx-swap="innerHTML">
+        <i class="bi bi-arrow-repeat"></i>
+      </button>
+      {% endif %}
+    </form>
+    {% endif %}
+  </div>
+
+  {% if error %}<div class="alert alert-warning small py-2 mb-2">{{ error }}</div>{% endif %}
+  {% if not agents_enabled %}<p class="small text-muted mb-0">Agents are turned off (AGENTS_ENABLED=False).</p>{% endif %}
+
+  {% if plan.days %}
+  <div class="mb-3">
+    <div class="small text-muted mb-1">
+      Study plan v{{ plan.version }}{% if days_left is not None %} · {{ days_left }} day{{ days_left|pluralize }} to exam{% endif %}
+      · updated {{ plan.updated_at|timesince }} ago
+    </div>
+    {% if plan.rationale %}<p class="small mb-2">{{ plan.rationale }}</p>{% endif %}
+    <div style="overflow-x:auto;">
+      <table class="table table-sm small align-middle mb-0">
+        <thead><tr><th>Day</th><th>Focus</th><th>Tasks</th><th class="text-end">Min</th></tr></thead>
+        <tbody>
+        {% for day in plan.days %}
+          <tr{% if day.date == today|date:'Y-m-d' %} class="table-active"{% endif %}>
+            <td class="text-nowrap">{{ day.date }}</td>
+            <td>{{ day.focus }}</td>
+            <td>{{ day.tasks|join:" · " }}</td>
+            <td class="text-end">{{ day.minutes }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% elif agents_enabled %}
+  <p class="small text-muted">Set your exam date and the study-plan agent will build a schedule from your results, then keep adjusting it every time you grade your answers.</p>
+  {% endif %}
+
+  {% if runs %}
+  <div class="small fw-semibold mb-1">Recent agent activity</div>
+  <ul class="list-unstyled mb-0">
+    {% for run in runs %}
+    <li class="border-top pt-2 mt-2">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <span class="badge bg-secondary">{{ run.get_agent_display }}</span>
+        {% if run.status == 'running' %}<span class="badge bg-info text-dark">working…</span>
+        {% elif run.status == 'failed' %}<span class="badge bg-danger">failed</span>
+        {% else %}<span class="badge bg-success">done</span>{% endif %}
+        {% if run.provider %}<span class="text-muted">via {{ run.provider }}</span>{% endif %}
+        <span class="text-muted">· {{ run.created_at|timesince }} ago</span>
+      </div>
+      {% if run.output %}<div class="mt-1">{{ run.output|linebreaksbr }}</div>{% endif %}
+      {% if run.status == 'failed' %}<div class="mt-1 text-danger">The agent couldn't finish this time. Your normal grading still works.</div>{% endif %}
+      {% if run.steps %}
+      <details class="mt-1">
+        <summary class="text-muted">What the agent did ({{ run.steps|length }} step{{ run.steps|length|pluralize }})</summary>
+        <ol class="mb-0 mt-1 ps-3">
+          {% for step in run.steps %}<li><code>{{ step.tool }}</code> - {{ step.result }}</li>{% endfor %}
+        </ol>
+      </details>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>

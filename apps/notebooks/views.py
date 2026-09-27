@@ -1,3 +1,4 @@
+import re
 import threading
 import logging
 from datetime import timedelta
@@ -20,6 +21,9 @@ from .services.document_processor import extract_document_text, tesseract_ocr_av
 from .services import ai_service
 from .services import grading
 from .services import throttle
+from .agents import hooks as agent_hooks
+from .agents import workflows as agent_workflows
+from .models import AgentRun
 from .services.features_service import (
     AnalyticsService, SpacedRepetitionService, AchievementService,
     NotificationService, ExamService, LearningPathService, PreferencesService
@@ -90,6 +94,9 @@ def _process_notebook(notebook_id: int):
             notebook.status = Notebook.STATUS_READY
             notebook.processing_stage = Notebook.STAGE_READY
             notebook.save(update_fields=['status', 'processing_stage'])
+            # Agent: verify the generated questions against the notes. Runs after the
+            # notebook is marked ready, so the student isn't kept waiting.
+            agent_hooks.after_questions_generated(notebook)
 
     except Exception as exc:
         logger.exception('Error processing notebook %s', notebook_id)
@@ -334,7 +341,15 @@ def notebook_chat(request, pk):
     assistant_msg = None
     error = None
     try:
-        answer = ai_service.answer_notebook_question(source_text, history_payload, question)
+        answer = None
+        if agent_hooks.enabled():
+            # Agentic tutor: can search notes, check performance and schedule practice.
+            run = agent_workflows.run_coach(request.user, notebook, history_payload, question)
+            if run.status == AgentRun.STATUS_OK:
+                answer = run.output
+        if answer is None:
+            # Fallback: the original single-call tutor.
+            answer = ai_service.answer_notebook_question(source_text, history_payload, question)
         assistant_msg = NotebookChatMessage.objects.create(
             notebook=notebook, user=request.user, role=NotebookChatMessage.ROLE_ASSISTANT, content=answer,
         )
@@ -425,13 +440,19 @@ def grade_answers(request, pk):
         elif answer.grade == Answer.GRADE_CORRECT:
             correct_count += 1
 
-    return render(request, 'notebooks/partials/grade_results.html', {
+    # Agents: feedback agent for each missed question, then automatic re-plan.
+    # Runs in the background; the Coach panel refreshes to show the results.
+    agent_hooks.after_grading(request.user, notebook, missed_questions)
+
+    response = render(request, 'notebooks/partials/grade_results.html', {
         'graded': graded,
         'notebook': notebook,
         'correct_count': correct_count,
         'missed_count': len(missed_questions),
         'total_graded': len(graded),
     })
+    response['HX-Trigger'] = 'coachRefresh'
+    return response
 
 
 # ────────────────────────── Reformat Notes ──────────────────────────
@@ -745,6 +766,73 @@ def _can_view_notebook(user, notebook, token=None):
     return False
 
 
+class _LimitedReader:
+    """Wraps a file object so FileResponse only streams `remaining` bytes -
+    used to cut off a Range response at the requested end byte instead of
+    streaming to EOF."""
+
+    def __init__(self, fileobj, remaining):
+        self._fileobj = fileobj
+        self._remaining = remaining
+
+    def read(self, size=-1):
+        if self._remaining <= 0:
+            return b''
+        if size < 0 or size > self._remaining:
+            size = self._remaining
+        data = self._fileobj.read(size)
+        self._remaining -= len(data)
+        return data
+
+    def close(self):
+        self._fileobj.close()
+
+
+_RANGE_RE = re.compile(r'bytes=(\d*)-(\d*)$')
+
+
+def _serve_file_range(request, field_file, content_type, filename=None):
+    """Serve a FieldFile with HTTP Range support.
+
+    Django's FileResponse has no built-in Range handling (that only exists
+    in the dev-only django.views.static.serve, not here), so a plain
+    FileResponse always returns the whole file with a 200. Mobile browsers -
+    iOS Safari in particular - refuse to play audio/video at all without a
+    206 Partial Content response to their Range request, so without this,
+    <audio>/<video> elements silently fail to load on phones even though the
+    same URL works fine in a desktop browser that tolerates the missing
+    Range support.
+    """
+    file_size = field_file.size
+    range_match = _RANGE_RE.match(request.headers.get('Range', ''))
+
+    if not range_match:
+        response = FileResponse(field_file.open('rb'), filename=filename, content_type=content_type)
+        response['Accept-Ranges'] = 'bytes'
+        return response
+
+    start_str, end_str = range_match.groups()
+    start = int(start_str) if start_str else 0
+    end = int(end_str) if end_str else file_size - 1
+    end = min(end, file_size - 1)
+
+    if start > end or start >= file_size:
+        response = HttpResponse(status=416)
+        response['Content-Range'] = f'bytes */{file_size}'
+        return response
+
+    length = end - start + 1
+    fh = field_file.open('rb')
+    fh.seek(start)
+    response = FileResponse(
+        _LimitedReader(fh, length), status=206, filename=filename, content_type=content_type,
+    )
+    response['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+    response['Accept-Ranges'] = 'bytes'
+    response['Content-Length'] = str(length)
+    return response
+
+
 def serve_notebook_pdf(request, pk):
     """Gated replacement for linking straight to notebook.pdf_file.url."""
     notebook = get_object_or_404(Notebook, pk=pk)
@@ -752,8 +840,8 @@ def serve_notebook_pdf(request, pk):
         raise Http404()
     if not notebook.pdf_file:
         raise Http404()
-    return FileResponse(
-        notebook.pdf_file.open('rb'),
+    return _serve_file_range(
+        request, notebook.pdf_file, 'application/pdf',
         filename=notebook.pdf_file.name.rsplit('/', 1)[-1],
     )
 
@@ -766,7 +854,7 @@ def serve_summary_audio(request, pk):
     summary = getattr(notebook, 'summary', None)
     if not summary or not summary.audio_file:
         raise Http404()
-    return FileResponse(summary.audio_file.open('rb'))
+    return _serve_file_range(request, summary.audio_file, 'audio/mpeg')
 
 
 @login_required

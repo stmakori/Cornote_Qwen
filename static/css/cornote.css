@@ -193,10 +193,18 @@ body.cornote-body {
 .cornote-nav {
   background: var(--bg-surface);
   border-bottom: 1px solid var(--bg-border);
-  height: var(--toolbar-h);
+  min-height: var(--toolbar-h);
   position: sticky;
   top: 0;
   z-index: 100;
+}
+/* On mobile the collapsed menu expands below the fixed-height brand/toggler
+   row - without this the fixed `height` above stopped the nav's own
+   background from covering that expanded area, so the open menu rendered
+   see-through over the page content beneath it. */
+.cornote-nav .navbar-collapse.show,
+.cornote-nav .navbar-collapse.collapsing {
+  background: var(--bg-surface);
 }
 .cornote-nav .navbar-brand { color: var(--text-primary) !important; letter-spacing: -.3px; }
 .cornote-nav .nav-link     { color: var(--text-muted); font-size: .85rem; transition: color .12s; }
@@ -271,8 +279,7 @@ body.cornote-body {
 .notebook-workspace {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--toolbar-h));
-  min-height: 0;
+  min-height: calc(100vh - var(--toolbar-h));
   max-width: 1680px;
   margin: 0 auto;
 }
@@ -323,11 +330,50 @@ body.cornote-body {
 ════════════════════════════════════════════════════════════ */
 .cornell-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) 1fr;
-  flex: 1 1 auto;
-  min-height: 0;
-  height: auto;
+  grid-template-columns: minmax(280px, 360px) 1fr minmax(280px, 340px);
+  height: calc(100vh - var(--toolbar-h) - var(--notebook-toolbar-min));
   border-bottom: 1px solid var(--bg-border);
+}
+.cornell-grid.coach-collapsed {
+  grid-template-columns: minmax(280px, 360px) 1fr;
+}
+.cornell-grid.coach-collapsed .cornell-coach {
+  display: none;
+}
+
+/* Coach sidebar column */
+.cornell-coach {
+  position: relative;
+  border-left: 1px solid var(--bg-border);
+  background: var(--bg-base);
+  padding-top: 1.75rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+.cornell-coach .coach-card {
+  border: none;
+  border-radius: 0;
+}
+.cornell-coach .coach-card > .d-flex.justify-content-between {
+  flex-direction: column;
+  align-items: stretch !important;
+}
+.cornell-coach .coach-card form {
+  margin-top: .5rem;
+}
+#coach-toggle-btn.active {
+  color: var(--accent);
+  background: var(--bg-border);
+}
+
+/* Minimize control pinned to the sidebar itself, independent of the HTMX-swapped content below it */
+.cornell-coach-minimize {
+  position: absolute;
+  top: .5rem;
+  right: .5rem;
+  z-index: 2;
+  padding: .15rem .45rem;
+  line-height: 1;
 }
 
 /* Column headers */
@@ -354,6 +400,7 @@ body.cornote-body {
   display: flex;
   flex-direction: row;
   overflow: hidden;
+  min-height: 0;
 }
 
 /* Sidebar nav strip */
@@ -365,9 +412,7 @@ body.cornote-body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  scrollbar-width: none;
 }
-.q-sidebar::-webkit-scrollbar { display: none; }
 
 .q-sidebar-header {
   font-size: .55rem;
@@ -429,6 +474,7 @@ body.cornote-body {
 .q-detail {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -503,6 +549,7 @@ body.cornote-body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
   background: var(--bg-base);
 }
 .notes-textarea {
@@ -520,7 +567,8 @@ body.cornote-body {
 }
 .notes-textarea:focus { outline: none; }
 
-/* ── Notes formatted read view ── */
+/* ── Notes formatted read view: its own scrollbar, so long notes don't force a
+   full-page scroll to reach Summary & review below the grid ── */
 .notes-render {
   flex: 1;
   overflow-y: auto;
@@ -880,21 +928,28 @@ body.cornote-body {
    RESPONSIVE
 ════════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
-  .cornell-grid {
+  .cornell-grid,
+  .cornell-grid.coach-collapsed {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
+    grid-template-rows: auto auto auto;
     height: auto;
   }
   .cornell-questions {
     border-right: none;
     border-bottom: 2px solid var(--bg-border);
-    max-height: 60vh;
-    overflow-y: auto;
+    max-height: 50vh;
   }
   .cornell-notes {
-    min-height: 50vh;
+    max-height: 50vh;
   }
-  .notes-textarea { height: 50vh; }
+  .cornell-coach {
+    border-left: none;
+    border-top: 2px solid var(--bg-border);
+    max-height: 50vh;
+  }
+  .cornell-grid.coach-collapsed .cornell-coach {
+    display: none;
+  }
   .cornell-summary-panel {
     max-height: min(52vh, 380px);
   }
@@ -1105,12 +1160,10 @@ body.fullscreen-mode .notebook-toolbar {
   display: none;
 }
 body.fullscreen-mode .notebook-workspace {
-  height: 100vh;
+  min-height: 100vh;
 }
 body.fullscreen-mode .cornell-grid {
-  flex: 1 1 auto;
-  min-height: 0;
-  height: auto;
+  height: 100vh;
 }
 
 /* ── Keyboard shortcut hint ── */

@@ -1067,11 +1067,17 @@ def user_study_groups(request):
 @login_required
 @require_POST
 def create_study_group(request):
-    """Create a new study group"""
+    """Create a new study group.
+
+    Called from a plain (non-AJAX) HTML form on the study groups page, so
+    this must redirect like its siblings join_group/leave_group - it used to
+    return JsonResponse, which left the browser stranded on the raw JSON
+    response instead of navigating anywhere.
+    """
     name = request.POST.get('name', '')
     description = request.POST.get('description', '')
     is_public = request.POST.get('is_public', 'false').lower() == 'true'
-    
+
     group = StudyGroup.objects.create(
         name=name,
         description=description,
@@ -1079,12 +1085,9 @@ def create_study_group(request):
         is_public=is_public,
     )
     group.members.add(request.user)
-    
-    return JsonResponse({
-        'id': group.id,
-        'name': group.name,
-        'invite_code': group.invite_code,
-    })
+
+    messages.success(request, f'"{group.name}" created!')
+    return redirect('notebooks:study_group_detail_page', group_id=group.id)
 
 
 @login_required
